@@ -1,0 +1,626 @@
+// Castlekeep prototype: a self-custodial exchange vault on a local Bitcoin
+// regtest chain.
+//
+// The program starts its own btcd node in regtest mode, mines blocks to
+// activate Taproot and CSV, then runs four scenarios against real consensus
+// rules:
+//
+//	A. Happy path      - lock, trade, cooperative settle
+//	B. Exchange gone   - exit request, wait 144 blocks, user claims alone
+//	C. Reversal attack - user sells, price rises, user tries to exit with the
+//	                     coins; the exchange publishes the signed sale state
+//	D. Exchange theft  - exchange tries to move the vault on its own
+//
+// TEST NETWORK ONLY. Do not use with real bitcoin.
+package main
+
+import (
+	"encoding/hex"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
+)
+
+const (
+	rpcListen = "127.0.0.1:18556"
+	p2pListen = "127.0.0.1:18555"
+	rpcUser   = "castlekeep"
+	rpcPass   = "castlekeep"
+
+	exitDelay = 144  // blocks (~24 hours on mainnet) after an exit request
+	txFee     = 1000 // sats per transaction, flat, fine for regtest
+
+	sat = 100_000_000
+)
+
+var net = &chaincfg.RegressionNetParams
+
+// numsKey is the standard "nothing up my sleeve" point from BIP 341. Nobody
+// knows its private key, so using it as the Taproot internal key disables the
+// key path: the vault can only be spent through its scripts.
+var numsKey = mustParseXOnly("50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0")
+
+// ---------------------------------------------------------------- parties
+
+type party struct {
+	name   string
+	key    *btcec.PrivateKey // signs vault spends
+	wallet *btcec.PrivateKey // receives payouts (ordinary BIP 86 address)
+}
+
+func newParty(name string) *party {
+	k, _ := btcec.NewPrivateKey()
+	w, _ := btcec.NewPrivateKey()
+	return &party{name: name, key: k, wallet: w}
+}
+
+func (p *party) xonly() []byte { return schnorr.SerializePubKey(p.key.PubKey()) }
+
+func (p *party) payoutScript() []byte {
+	tweaked := txscript.ComputeTaprootKeyNoScript(p.wallet.PubKey())
+	s, _ := txscript.PayToTaprootScript(tweaked)
+	return s
+}
+
+// ---------------------------------------------------------------- scripts
+
+// twoOfTwo: <user> OP_CHECKSIGVERIFY <exchange> OP_CHECKSIG
+func twoOfTwo(user, exch *party) []byte {
+	s, err := txscript.NewScriptBuilder().
+		AddData(user.xonly()).AddOp(txscript.OP_CHECKSIGVERIFY).
+		AddData(exch.xonly()).AddOp(txscript.OP_CHECKSIG).
+		Script()
+	must(err)
+	return s
+}
+
+// userAfterDelay: <144> OP_CHECKSEQUENCEVERIFY OP_DROP <user> OP_CHECKSIG
+func userAfterDelay(user *party) []byte {
+	s, err := txscript.NewScriptBuilder().
+		AddInt64(exitDelay).AddOp(txscript.OP_CHECKSEQUENCEVERIFY).AddOp(txscript.OP_DROP).
+		AddData(user.xonly()).AddOp(txscript.OP_CHECKSIG).
+		Script()
+	must(err)
+	return s
+}
+
+type tapOutput struct {
+	pkScript []byte
+	tree     *txscript.IndexedTapScriptTree
+}
+
+func newTapOutput(leaves ...txscript.TapLeaf) *tapOutput {
+	tree := txscript.AssembleTaprootScriptTree(leaves...)
+	root := tree.RootNode.TapHash()
+	outKey := txscript.ComputeTaprootOutputKey(numsKey, root[:])
+	pk, err := txscript.PayToTaprootScript(outKey)
+	must(err)
+	return &tapOutput{pkScript: pk, tree: tree}
+}
+
+func (o *tapOutput) controlBlock(leaf txscript.TapLeaf) []byte {
+	idx := o.tree.LeafProofIndex[leaf.TapHash()]
+	cb := o.tree.LeafMerkleProofs[idx].ToControlBlock(numsKey)
+	b, err := cb.ToBytes()
+	must(err)
+	return b
+}
+
+func leafSig(tx *wire.MsgTx, amt int64, out *tapOutput, leaf txscript.TapLeaf, key *btcec.PrivateKey) []byte {
+	fetcher := txscript.NewCannedPrevOutputFetcher(out.pkScript, amt)
+	hashes := txscript.NewTxSigHashes(tx, fetcher)
+	sig, err := txscript.RawTxInTapscriptSignature(tx, hashes, 0, amt, out.pkScript, leaf, txscript.SigHashDefault, key)
+	must(err)
+	return sig
+}
+
+// ---------------------------------------------------------------- vault
+
+// Vault is the 2-of-2 output plus the pre-signed exit request.
+//
+//	Vault output V:  [2-of-2]
+//	Exit output  E:  [2-of-2] or [user alone after 144 blocks]
+//
+// The exit request (V -> E) is signed by both parties when the vault is
+// created, so the user can always start the 144-block clock on their own.
+type Vault struct {
+	user, exch *party
+
+	multisigLeaf txscript.TapLeaf
+	delayLeaf    txscript.TapLeaf
+	V, E         *tapOutput
+
+	vaultOut wire.OutPoint
+	vaultAmt int64
+
+	exitTx  *wire.MsgTx
+	exitAmt int64
+}
+
+func newVault(user, exch *party) *Vault {
+	v := &Vault{user: user, exch: exch}
+	v.multisigLeaf = txscript.NewBaseTapLeaf(twoOfTwo(user, exch))
+	v.delayLeaf = txscript.NewBaseTapLeaf(userAfterDelay(user))
+	v.V = newTapOutput(v.multisigLeaf)
+	v.E = newTapOutput(v.multisigLeaf, v.delayLeaf)
+	return v
+}
+
+// presignExit builds the V -> E transaction and has both parties sign it.
+func (v *Vault) presignExit() {
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(wire.NewTxIn(&v.vaultOut, nil, nil))
+	v.exitAmt = v.vaultAmt - txFee
+	tx.AddTxOut(wire.NewTxOut(v.exitAmt, v.E.pkScript))
+	v.signMultisig(tx, v.vaultAmt, v.V)
+	v.exitTx = tx
+}
+
+func (v *Vault) exitOut() wire.OutPoint {
+	return wire.OutPoint{Hash: v.exitTx.TxHash(), Index: 0}
+}
+
+// signMultisig adds both signatures for the 2-of-2 leaf of `out`.
+func (v *Vault) signMultisig(tx *wire.MsgTx, amt int64, out *tapOutput) {
+	userSig := leafSig(tx, amt, out, v.multisigLeaf, v.user.key)
+	exchSig := leafSig(tx, amt, out, v.multisigLeaf, v.exch.key)
+	tx.TxIn[0].Witness = wire.TxWitness{exchSig, userSig, v.multisigLeaf.Script, out.controlBlock(v.multisigLeaf)}
+}
+
+// State is one co-signable split of the vault.
+type State struct {
+	label      string
+	userSats   int64 // BTC still belonging to the user
+	exchSats   int64 // BTC the exchange is owed (sold to buyers)
+	userPreSig []byte
+	tx         *wire.MsgTx
+}
+
+// payoutTx spends `prev` (worth `amt`) into the state's split. The fee comes
+// out of the user's share if there is one, otherwise the exchange's.
+func (v *Vault) payoutTx(prev wire.OutPoint, amt int64, s *State) *wire.MsgTx {
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(wire.NewTxIn(&prev, nil, nil))
+	scale := float64(amt) / float64(s.userSats+s.exchSats)
+	user := int64(float64(s.userSats) * scale)
+	exch := amt - user
+	if user > txFee {
+		user -= txFee
+	} else {
+		exch -= txFee
+	}
+	if user > 0 {
+		tx.AddTxOut(wire.NewTxOut(user, v.user.payoutScript()))
+	}
+	if exch > 0 {
+		tx.AddTxOut(wire.NewTxOut(exch, v.exch.payoutScript()))
+	}
+	return tx
+}
+
+// placeOrder: the user signs the post-trade state BEFORE the order fills
+// ("sign at order placement"). The exchange keeps that signature and only adds
+// its own if it ever needs to publish the state from the exit output.
+func (v *Vault) placeOrder(s *State) {
+	s.tx = v.payoutTx(v.exitOut(), v.exitAmt, s)
+	s.userPreSig = leafSig(s.tx, v.exitAmt, v.E, v.multisigLeaf, v.user.key)
+}
+
+// exchangePublishes completes a pre-signed state from the exit output.
+func (v *Vault) exchangePublishes(s *State) *wire.MsgTx {
+	exchSig := leafSig(s.tx, v.exitAmt, v.E, v.multisigLeaf, v.exch.key)
+	s.tx.TxIn[0].Witness = wire.TxWitness{exchSig, s.userPreSig, v.multisigLeaf.Script, v.E.controlBlock(v.multisigLeaf)}
+	return s.tx
+}
+
+// cooperativeSettle: both sign the final state straight from the vault.
+func (v *Vault) cooperativeSettle(s *State) *wire.MsgTx {
+	tx := v.payoutTx(v.vaultOut, v.vaultAmt, s)
+	v.signMultisig(tx, v.vaultAmt, v.V)
+	return tx
+}
+
+// userClaimsAlone spends the exit output through the delay leaf.
+func (v *Vault) userClaimsAlone() *wire.MsgTx {
+	tx := wire.NewMsgTx(2)
+	prev := v.exitOut()
+	in := wire.NewTxIn(&prev, nil, nil)
+	in.Sequence = exitDelay // relative timelock, BIP 68
+	tx.AddTxIn(in)
+	tx.AddTxOut(wire.NewTxOut(v.exitAmt-txFee, v.user.payoutScript()))
+	sig := leafSig(tx, v.exitAmt, v.E, v.delayLeaf, v.user.key)
+	tx.TxIn[0].Witness = wire.TxWitness{sig, v.delayLeaf.Script, v.E.controlBlock(v.delayLeaf)}
+	return tx
+}
+
+// ---------------------------------------------------------------- chain
+
+type chain struct {
+	rpc       *rpcclient.Client
+	miner     *btcec.PrivateKey
+	minerPk   []byte
+	coinbases []wire.OutPoint
+	cbAmts    []int64
+}
+
+func (c *chain) mine(n uint32) {
+	_, err := c.rpc.Generate(n)
+	must(err)
+}
+
+func (c *chain) height() int64 {
+	h, err := c.rpc.GetBlockCount()
+	must(err)
+	return h
+}
+
+func (c *chain) send(tx *wire.MsgTx) error {
+	_, err := c.rpc.SendRawTransaction(tx, true)
+	return err
+}
+
+// fund locks `amt` sats into the vault from a mature coinbase output.
+func (c *chain) fund(v *Vault, amt int64) {
+	prev, prevAmt := c.coinbases[0], c.cbAmts[0]
+	c.coinbases, c.cbAmts = c.coinbases[1:], c.cbAmts[1:]
+
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(wire.NewTxIn(&prev, nil, nil))
+	tx.AddTxOut(wire.NewTxOut(amt, v.V.pkScript))
+	tx.AddTxOut(wire.NewTxOut(prevAmt-amt-txFee, c.minerPk))
+	fetcher := txscript.NewCannedPrevOutputFetcher(c.minerPk, prevAmt)
+	hashes := txscript.NewTxSigHashes(tx, fetcher)
+	wit, err := txscript.TaprootWitnessSignature(tx, hashes, 0, prevAmt, c.minerPk, txscript.SigHashDefault, c.miner)
+	must(err)
+	tx.TxIn[0].Witness = wit
+	must(c.send(tx))
+	c.mine(1)
+
+	v.vaultOut = wire.OutPoint{Hash: tx.TxHash(), Index: 0}
+	v.vaultAmt = amt
+}
+
+// paid returns the sats currently sitting in unspent output (txid, i).
+func (c *chain) paid(txid chainhash.Hash, i uint32) int64 {
+	r, err := c.rpc.GetTxOut(&txid, i, false)
+	if err != nil || r == nil {
+		return 0
+	}
+	a, _ := btcutil.NewAmount(r.Value)
+	return int64(a)
+}
+
+func (c *chain) unspent(op wire.OutPoint) bool { return c.paid(op.Hash, op.Index) > 0 }
+
+// ---------------------------------------------------------------- output
+
+var failures int
+
+func title(s string)          { fmt.Printf("\n\033[1m=== %s ===\033[0m\n", s) }
+func step(f string, a ...any) { fmt.Printf("  • "+f+"\n", a...) }
+
+func check(ok bool, f string, a ...any) {
+	if ok {
+		fmt.Printf("  \033[32m✔ "+f+"\033[0m\n", a...)
+	} else {
+		failures++
+		fmt.Printf("  \033[31m✘ FAILED: "+f+"\033[0m\n", a...)
+	}
+}
+
+func btc(s int64) string { return fmt.Sprintf("%.8f BTC", float64(s)/sat) }
+
+func shortErr(err error) string {
+	if err == nil {
+		return "accepted"
+	}
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "sequence locks"):
+		return "node: relative timelock not yet satisfied"
+	case strings.Contains(s, "orphan") || strings.Contains(s, "already spent"):
+		return "node: the exit output was already spent by the exchange's settlement"
+	case strings.Contains(s, "failed to validate input"):
+		return "node: script check failed, missing a valid user signature"
+	}
+	if i := strings.Index(s, ":"); i > 0 && i < 6 {
+		s = strings.TrimSpace(s[i+1:])
+	}
+	if len(s) > 110 {
+		s = s[:110] + "…"
+	}
+	return s
+}
+
+// ---------------------------------------------------------------- scenarios
+
+func scenarioHappy(c *chain) {
+	title("A. Happy path: lock, trade, settle")
+	user, exch := newParty("user"), newParty("exchange")
+	v := newVault(user, exch)
+	c.fund(v, 1*sat)
+	v.presignExit()
+	step("User locks %s into the 2-of-2 vault (block %d). Exit request pre-signed by both.", btc(v.vaultAmt), c.height())
+
+	sale := &State{label: "sold 0.6 BTC @ $65,000", userSats: 40_000_000, exchSats: 60_000_000}
+	v.placeOrder(sale)
+	step("User places a sell order for 0.6 BTC at $65,000 and signs the post-trade state up front.")
+	step("Order fills instantly on the exchange's book (off-chain).")
+
+	tx := v.cooperativeSettle(sale)
+	err := c.send(tx)
+	check(err == nil, "Cooperative settlement accepted by the node (%s)", shortErr(err))
+	c.mine(1)
+	h := tx.TxHash()
+	check(c.paid(h, 0) > 39_000_000, "User received %s back in their own wallet", btc(c.paid(h, 0)))
+	check(c.paid(h, 1) == 60_000_000, "Exchange received %s for the buyer", btc(c.paid(h, 1)))
+	check(!c.unspent(v.vaultOut), "Vault is closed; no waiting period was needed")
+}
+
+func scenarioExchangeGone(c *chain) {
+	title("B. Exchange disappears: exit request + 144-block window")
+	user, exch := newParty("user"), newParty("exchange")
+	v := newVault(user, exch)
+	c.fund(v, 1*sat)
+	v.presignExit()
+	step("User locks %s. Then the exchange goes offline and stops signing.", btc(v.vaultAmt))
+
+	err := c.send(v.exitTx)
+	check(err == nil, "User broadcasts the pre-signed exit request on their own (%s)", shortErr(err))
+	c.mine(1)
+	start := c.height()
+
+	c.mine(50)
+	err = c.send(v.userClaimsAlone())
+	check(err != nil, "Claim after only 50 blocks is REJECTED by consensus (%s)", shortErr(err))
+
+	// Mine until the relative timelock is satisfied, counting the blocks.
+	var waited int64
+	for {
+		err = c.send(v.userClaimsAlone())
+		if err == nil || c.height()-start > exitDelay+5 {
+			break
+		}
+		c.mine(1)
+	}
+	waited = c.height() - start + 1
+	check(err == nil, "Claim accepted once %d blocks had passed since the exit request (%s)", waited, shortErr(err))
+	c.mine(1)
+	tx := v.userClaimsAlone()
+	check(c.paid(tx.TxHash(), 0) > 0, "User holds %s again, with no help from the exchange", btc(c.paid(tx.TxHash(), 0)))
+}
+
+func scenarioReversal(c *chain) {
+	title("C. Reversal attack: sell at $65k, price jumps to $70k, try to keep the coins")
+	user, exch := newParty("user"), newParty("exchange")
+	v := newVault(user, exch)
+	c.fund(v, 1*sat)
+	v.presignExit()
+	sale := &State{label: "sold 0.6 BTC @ $65,000", userSats: 40_000_000, exchSats: 60_000_000}
+	v.placeOrder(sale)
+	step("User locks %s and sells 0.6 BTC at $65,000 (state pre-signed at order placement).", btc(v.vaultAmt))
+	step("BTC rises to $70,000. User refuses to settle and broadcasts the exit request instead.")
+
+	err := c.send(v.exitTx)
+	check(err == nil, "Exit request confirmed; the 144-block response window starts (%s)", shortErr(err))
+	c.mine(1)
+
+	step("Exchange watchtower sees the exit request and publishes the latest state the user signed.")
+	pub := v.exchangePublishes(sale)
+	err = c.send(pub)
+	check(err == nil, "Exchange's settlement accepted inside the window (%s)", shortErr(err))
+	c.mine(1)
+	h := pub.TxHash()
+	check(c.paid(h, 1) > 0, "Buyer's 0.6 BTC goes to the exchange: %s", btc(c.paid(h, 1)))
+	check(c.paid(h, 0) > 0, "User keeps only the unsold 0.4 BTC: %s", btc(c.paid(h, 0)))
+
+	c.mine(exitDelay)
+	err = c.send(v.userClaimsAlone())
+	check(err != nil, "User's attempt to claim the whole vault after 144 blocks is REJECTED (%s)", shortErr(err))
+}
+
+func scenarioTheft(c *chain) {
+	title("D. Exchange tries to take the coins on its own")
+	user, exch := newParty("user"), newParty("exchange")
+	v := newVault(user, exch)
+	c.fund(v, 1*sat)
+	step("User locks %s. The exchange signs a transaction paying everything to itself.", btc(v.vaultAmt))
+
+	steal := &State{userSats: 0, exchSats: 1}
+	tx := v.payoutTx(v.vaultOut, v.vaultAmt, steal)
+	exchSig := leafSig(tx, v.vaultAmt, v.V, v.multisigLeaf, exch.key)
+	fake := make([]byte, 64) // no valid user signature available
+	tx.TxIn[0].Witness = wire.TxWitness{exchSig, fake, v.multisigLeaf.Script, v.V.controlBlock(v.multisigLeaf)}
+	err := c.send(tx)
+	check(err != nil, "Exchange-only spend REJECTED by consensus (%s)", shortErr(err))
+
+	// Same thing, but the exchange swaps in its own key for the user's slot.
+	selfSig := leafSig(tx, v.vaultAmt, v.V, v.multisigLeaf, exch.key)
+	tx.TxIn[0].Witness = wire.TxWitness{exchSig, selfSig, v.multisigLeaf.Script, v.V.controlBlock(v.multisigLeaf)}
+	err = c.send(tx)
+	check(err != nil, "Signing twice with the exchange key is also REJECTED (%s)", shortErr(err))
+	check(c.unspent(v.vaultOut), "Vault still holds the user's %s", btc(v.vaultAmt))
+}
+
+// ---------------------------------------------------------------- main
+
+func main() {
+	btcdPath := flag.String("btcd", "btcd", "path to the btcd binary")
+	keep := flag.Bool("keep", false, "keep the regtest data directory afterwards")
+	flag.Parse()
+
+	miner, _ := btcec.NewPrivateKey()
+	minerTap := txscript.ComputeTaprootKeyNoScript(miner.PubKey())
+	minerAddr, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(minerTap), net)
+	must(err)
+	minerPk, _ := txscript.PayToAddrScript(minerAddr)
+
+	dir, err := os.MkdirTemp("", "castlekeep-regtest-")
+	must(err)
+	if !*keep {
+		defer os.RemoveAll(dir)
+	}
+
+	node := exec.Command(*btcdPath, "--regtest", "--notls",
+		"--datadir="+dir+"/data", "--logdir="+dir+"/logs",
+		"--rpcuser="+rpcUser, "--rpcpass="+rpcPass,
+		"--rpclisten="+rpcListen, "--listen="+p2pListen,
+		"--miningaddr="+minerAddr.EncodeAddress(), "--txindex")
+	must(node.Start())
+	defer node.Process.Kill()
+
+	rpc, err := rpcclient.New(&rpcclient.ConnConfig{
+		Host: rpcListen, User: rpcUser, Pass: rpcPass,
+		HTTPPostMode: true, DisableTLS: true,
+	}, nil)
+	must(err)
+	defer rpc.Shutdown()
+
+	for i := 0; ; i++ {
+		if _, err := rpc.GetBlockCount(); err == nil {
+			break
+		}
+		if i > 60 {
+			fail(errors.New("btcd did not start; check -btcd path"))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	c := &chain{rpc: rpc, miner: miner, minerPk: minerPk}
+	fmt.Println("Castlekeep prototype — local regtest chain (test coins only)")
+	fmt.Println("Mining 500 blocks to activate CSV, SegWit and Taproot…")
+	c.mine(500)
+	info, err := rpc.GetBlockChainInfo()
+	must(err)
+	for _, name := range []string{"csv", "segwit", "taproot"} {
+		status := "unknown"
+		if f, ok := info.Bip9SoftForks[name]; ok {
+			status = f.Status
+		}
+		fmt.Printf("  %-8s %s\n", name, status)
+	}
+
+	for h := int64(1); h <= 20; h++ {
+		hash, err := rpc.GetBlockHash(h)
+		must(err)
+		blk, err := rpc.GetBlock(hash)
+		must(err)
+		cb := blk.Transactions[0]
+		c.coinbases = append(c.coinbases, wire.OutPoint{Hash: cb.TxHash(), Index: 0})
+		c.cbAmts = append(c.cbAmts, cb.TxOut[0].Value)
+	}
+
+	scenarioHappy(c)
+	scenarioExchangeGone(c)
+	scenarioReversal(c)
+	scenarioTheft(c)
+
+	fmt.Println()
+	if failures == 0 {
+		fmt.Println("\033[1;32mAll checks passed.\033[0m Every result above was enforced by Bitcoin consensus rules on a real node.")
+	} else {
+		fmt.Printf("\033[1;31m%d check(s) failed.\033[0m\n", failures)
+		os.Exit(1)
+	}
+}
+
+// ---------------------------------------------------------------- helpers
+
+func mustParseXOnly(h string) *btcec.PublicKey {
+	b, _ := hex.DecodeString(h)
+	k, err := schnorr.ParsePubKey(b)
+	must(err)
+	return k
+}
+
+func must(err error) {
+	if err != nil {
+		fail(err)
+	}
+}
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, "error:", err)
+	os.Exit(1)
+}
+
+# Castlekeep prototype
+
+A working proof of concept for **Castlekeep**: trade bitcoin on an exchange without
+the exchange ever holding your coins. It runs on a private Bitcoin **regtest** chain
+(test coins only), using a real Bitcoin node (btcd) to enforce every rule.
+
+> **Test network only.** Nothing here has been audited. Never use it with real bitcoin.
+
+## What it proves
+
+| Scenario | What happens | Enforced by |
+| --- | --- | --- |
+| A. Happy path | User locks 1 BTC, sells 0.6 BTC, both sign, coins return straight away | 2-of-2 Taproot script |
+| B. Exchange disappears | User broadcasts the pre-signed exit request; a claim at 50 blocks is rejected; at 144 blocks the user claims alone | `OP_CHECKSEQUENCEVERIFY` (BIP 68/112) |
+| C. Reversal attack | User sells at $65k, price rises, user tries to exit with the coins; the exchange publishes the state the user pre-signed, so the buyer still gets the BTC | Sign-at-order-placement + response window |
+| D. Exchange theft | Exchange signs a spend paying itself everything; the node rejects it | 2-of-2 Taproot script |
+
+Sample output is in `sample-output.txt`.
+
+## How the vault is built
+
+```
+Vault output V   (Taproot, unspendable key path)
+  └─ leaf: <user> CHECKSIGVERIFY <exchange> CHECKSIG          ← both must sign
+
+Exit output E    (reached only via the pre-signed exit request V → E)
+  ├─ leaf: <user> CHECKSIGVERIFY <exchange> CHECKSIG          ← exchange publishes the latest state
+  └─ leaf: <144> CHECKSEQUENCEVERIFY DROP <user> CHECKSIG     ← user alone, 144 blocks later
+```
+
+- **Exit request.** Signed by both parties when the vault is created, so the user can
+  start the 144-block (about 24-hour) clock on their own at any time.
+- **Sign at order placement.** When the user places an order, they sign the post-trade
+  split of the exit output. If the user later tries to exit, the exchange adds its
+  signature and publishes it inside the window.
+- The internal key is the BIP 341 "nothing up my sleeve" point, so there is no hidden
+  key-path spend.
+
+## Run it
+
+You need Go 1.21+ and btcd.
+
+```bash
+go install github.com/btcsuite/btcd@v0.24.2   # installs btcd into $(go env GOPATH)/bin
+cd castlekeep-proto
+go mod tidy
+go run . -btcd "$(go env GOPATH)/bin/btcd"
+```
+
+The program starts its own regtest node in a temporary folder, mines 500 blocks to
+activate CSV, SegWit and Taproot, runs the four scenarios, then shuts the node down.
+Add `-keep` to keep the chain data afterwards.
+
+## Not implemented yet (deliberately)
+
+- **Revocation penalties.** The exchange holds every state the user has pre-signed, so
+  in principle it could publish an *older* one. Short order expiry and Lightning-style
+  revocation keys are the planned fix (version 2).
+- **No real order book, prices or cash side.** Trades are simulated; only the BTC side is
+  self-custodied.
+- **No leverage check on-chain.** "Never owe more than the vault holds" is enforced by
+  the exchange's risk engine, not by script.
+- **Watchtower is simulated.** The scenario calls the exchange's response directly.
+- **Script-path cooperative spends.** A production version would use a MuSig2 key-path
+  spend for cheaper, more private settlements.
+- **Fees are flat (1,000 sats).** No fee bumping for congested blocks.
+
