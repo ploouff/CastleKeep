@@ -1,0 +1,81 @@
+# Castlekeep console
+
+A clickable version of the Castlekeep prototype. It runs a private Bitcoin test chain on
+your computer and opens a web page where you can lock BTC into a vault, trade, settle,
+request an exit, mine blocks, and switch the exchange between honest, offline and
+malicious. Every accept or reject comes from a real Bitcoin node (btcd).
+
+> **Test network only.** The coins have no value, nothing leaves your computer, and the
+> code hasn't been audited. Never use it with real bitcoin.
+
+## Run it (Windows, Command Prompt)
+
+You already installed Go and btcd for the first prototype. If not, run
+`go install github.com/btcsuite/btcd@v0.24.2` first.
+
+1. Unzip `castlekeep-console.zip` (right-click, Extract All).
+2. Open Command Prompt and go into the folder:
+   ```
+   cd %USERPROFILE%\Downloads\castlekeep-console\castlekeep-console
+   ```
+3. Fetch the libraries (first time only):
+   ```
+   go mod tidy
+   ```
+4. Start it:
+   ```
+   go run .
+   ```
+
+Your browser opens at `http://127.0.0.1:8080`. If it doesn't, copy the address printed in
+Command Prompt. The first start takes about a minute while it mines 500 test blocks.
+Press **Ctrl+C** in Command Prompt to stop; each run starts a fresh chain.
+
+Options: `-port 9000` to use another port, `-btcd C:\path\to\btcd.exe` if btcd lives
+somewhere else, `-no-browser` to skip opening the browser.
+
+## What's on screen
+
+| Area | What it does |
+| --- | --- |
+| Your wallet | Test BTC only you control. Get more from the faucet, or lock some into a vault. |
+| Vault | The 2-of-2 vault: the latest signed split, the 144-block exit clock, and the settle, exit and claim buttons. |
+| Exchange | Set the BTC price, sell or buy back, and choose how the exchange behaves. Includes a theft attempt. |
+| Activity | Every action, newest first. Red entries were refused by the node. |
+| Transaction inspector | What each transaction spends, what it creates, and which script unlocked it. |
+| Mine buttons | Blocks are the clock: 1 block is about 10 minutes, 144 is about a day. |
+
+## Things to try
+
+- **A normal trade:** lock 1 BTC, mine 1 block, sell 0.6, settle, mine 1 block.
+- **The exchange disappears:** set it to offline, request exit, mine 1, claim (refused),
+  mine 144, claim.
+- **Try to undo a sale:** sell at $65,000, set the price to $70,000, request exit, mine 1.
+  The exchange publishes the sale you already signed.
+- **A malicious exchange:** sell 0.5, buy 0.5 back, set it to malicious, request exit, mine 1.
+  It publishes your older state, which is the known gap version 2 closes.
+- **Attempted theft:** press "Have the exchange try to steal". The node refuses.
+
+## How it works
+
+```
+Vault output   (Taproot, no key path)
+  └─ <your key> CHECKSIGVERIFY <exchange key> CHECKSIG            both must sign
+
+Exit output    (reached by the exit request, pre-signed by both when the vault opens)
+  ├─ <your key> CHECKSIGVERIFY <exchange key> CHECKSIG            exchange publishes a state you signed
+  └─ 144 CHECKSEQUENCEVERIFY DROP <your key> CHECKSIG             you alone, 144 blocks later
+```
+
+Each order makes a new split of the vault that you sign before the order is sent. The
+exchange keeps those signatures so it can answer an exit request with your latest trade.
+
+## Known limits
+
+- **No revocation yet.** The exchange holds every state you've signed, so a malicious one
+  can publish an older state (shown in the malicious scenario).
+- **Buy back only up to what you sold from this vault.** The vault can't hold more BTC than
+  you locked.
+- **The cash side is custodial**, as on any exchange.
+- **Flat 1,000-sat fees** and no fee bumping.
+- State resets each time you restart the program.

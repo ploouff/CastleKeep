@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Castlekeep console</title>
+<style>
+:root{
+  --paper:#E8ECF0; --panel:#F6F8F9; --ink:#17212B; --steel:#55636F; --rule:#C3CCD5; --rule-soft:#D8DEE4;
+  --pine:#2D5D4C; --pine-tint:#DAE7E0; --slate:#3E5878; --slate-tint:#DCE3EC;
+  --amber:#AD7210; --amber-tint:#F3E5C9; --red:#A3322A; --red-tint:#F2DAD6;
+  --display:"Bahnschrift","DIN Alternate","DIN 2014","Barlow","Roboto Condensed","Arial Narrow",sans-serif;
+  --body:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --mono:"Cascadia Mono",Consolas,"SF Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html{background:var(--paper)}
+body{margin:0;font:15px/1.5 var(--body);color:var(--ink);font-variant-numeric:tabular-nums}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--slate);outline-offset:2px}
+.num{font-family:var(--display);font-weight:600;letter-spacing:.01em}
+.mono{font-family:var(--mono);font-size:12.5px;word-break:break-all}
+.muted{color:var(--steel)}
+.small{font-size:13px}
+
+/* header */
+header{display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:18px 28px;border-bottom:1px solid var(--rule);background:var(--panel)}
+.brand{display:flex;align-items:baseline;gap:14px;flex:1 1 auto;min-width:260px}
+.brand h1{font:600 28px/1 var(--display);margin:0;letter-spacing:.02em}
+.brand p{margin:0;color:var(--steel);font-size:14px}
+.chain{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.height{display:flex;flex-direction:column;line-height:1.1}
+.height b{font:600 26px/1 var(--display)}
+.height span{font-size:12.5px;color:var(--steel)}
+.mine{display:flex;gap:6px}
+
+/* buttons */
+.btn{border:1px solid var(--rule);background:#fff;border-radius:6px;padding:7px 13px;cursor:pointer;white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--steel)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--pine);border-color:var(--pine);color:#fff}
+.btn.primary:hover:not(:disabled){background:#244c3e}
+.btn.amber{border-color:var(--amber);color:#7a4f08}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.block{width:100%;white-space:normal}
+
+/* layout */
+main{display:grid;grid-template-columns:minmax(250px,290px) minmax(0,1fr) minmax(280px,330px);gap:22px;padding:22px 28px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:18px 20px}
+.panel h2{font:600 19px/1.2 var(--display);margin:0 0 4px;letter-spacing:.02em}
+.panel .sub{margin:0 0 14px;color:var(--steel);font-size:13.5px}
+.stack>*+*{margin-top:14px}
+.divider{border:0;border-top:1px solid var(--rule-soft);margin:16px 0}
+.figure{font:600 30px/1.1 var(--display)}
+.figure small{font-size:15px;color:var(--steel);font-weight:500}
+label{display:block;font-size:13.5px;color:var(--steel);margin-bottom:5px}
+.field{display:flex;gap:8px}
+.field input{flex:1;min-width:0;width:100%;border:1px solid var(--rule);border-radius:6px;padding:7px 10px;background:#fff}
+.hint{font-size:13px;color:var(--steel);margin:6px 0 0}
+
+/* vault */
+.vault{border:2px solid var(--pine);background:#FBFCFC;border-radius:12px;padding:22px 24px}
+.vault-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.status{font-size:13.5px;padding:4px 10px;border-radius:999px;background:var(--rule-soft);color:var(--ink)}
+.status.open{background:var(--pine-tint);color:var(--pine)}
+.status.wait{background:var(--amber-tint);color:#7a4f08}
+.status.closed{background:var(--slate-tint);color:var(--slate)}
+.keys{display:flex;gap:10px;margin:16px 0 4px;flex-wrap:wrap}
+.key{display:flex;align-items:center;gap:9px;border:1px solid var(--rule);border-radius:8px;padding:8px 12px;background:#fff;font-size:14px}
+.key svg{flex:none}
+.keys-note{font-size:13px;color:var(--steel);margin:6px 0 18px}
+.split-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.bar{display:flex;height:16px;border-radius:4px;overflow:hidden;background:var(--rule-soft)}
+.bar i{display:block;height:100%;transition:width .35s ease}
+.bar .you{background:var(--pine)} .bar .buy{background:var(--slate)}
+.legend{display:flex;gap:22px;margin-top:9px;font-size:13.5px;flex-wrap:wrap}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:7px;vertical-align:-1px;background:var(--c)}
+
+/* exit clock: the one memorable element */
+.clock{margin-top:22px;padding:16px 16px 14px;border-radius:10px;background:#fff;border:1px solid var(--rule-soft)}
+.clock-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.clock-head h3{font:600 16px/1.2 var(--display);margin:0;letter-spacing:.02em}
+.ticks{display:grid;grid-template-columns:repeat(72,1fr);gap:3px}
+.ticks i{height:18px;border-radius:2px;background:var(--rule-soft);transition:background-color .25s ease}
+.ticks i.on{background:var(--amber)}
+.ticks.done i.on{background:var(--pine)}
+.ticks.idle i{background:#E3E8EC}
+.clock-foot{display:flex;justify-content:space-between;font-size:12.5px;color:var(--steel);margin-top:7px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+.actions .btn{padding:9px 16px}
+.states{width:100%;border-collapse:collapse;font-size:14px;margin-top:6px}
+.states th{font-weight:500;color:var(--steel);text-align:left;font-size:13px;padding:6px 8px;border-bottom:1px solid var(--rule)}
+.states td{padding:7px 8px;border-bottom:1px solid var(--rule-soft)}
+.states td.r,.states th.r{text-align:right}
+.states tr.latest td{background:var(--pine-tint)}
+details summary{cursor:pointer;color:var(--slate);font-size:14px}
+details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:10px;white-space:pre-wrap;margin:8px 0 0}
+.empty{text-align:center;padding:36px 12px}
+.empty p{max-width:38ch;margin:8px auto 0;color:var(--steel)}
+
+/* exchange */
+.price{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.price .figure{min-width:6ch}
+.seg{display:flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden;background:#fff}
+.seg button{flex:1;border:0;background:transparent;padding:7px 8px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--rule)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.mode-desc{font-size:13px;color:var(--steel);margin:7px 0 0;min-height:2.6em}
+
+/* bottom */
+.lower{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:22px;padding:0 28px 40px}
+.log{list-style:none;margin:0;padding:0;max-height:560px;overflow:auto}
+.log li{border-left:3px solid var(--rule);padding:8px 12px 9px;margin-bottom:6px;background:#fff;border-radius:0 6px 6px 0}
+.log li.ok{border-color:var(--pine)} .log li.bad{border-color:var(--red);background:#FCF6F5}
+.log li.warn{border-color:var(--amber)} .log li.sign{border-color:var(--slate)}
+.log .t{font-weight:600;font-size:14.5px}
+.log li.bad .t{color:var(--red)}
+.log .d{font-size:13.5px;color:var(--steel);margin-top:2px}
+.log .m{font-size:12.5px;color:var(--steel);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}
+.link{background:none;border:0;padding:0;color:var(--slate);text-decoration:underline;cursor:pointer;font-size:12.5px}
+.txlist{list-style:none;margin:12px 0 0;padding:0;max-height:220px;overflow:auto;border-top:1px solid var(--rule-soft)}
+.txlist button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--rule-soft);padding:7px 4px;cursor:pointer;font-size:13.5px}
+.txlist button[aria-current="true"]{background:var(--slate-tint)}
+.chip{font-size:12px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.chip.confirmed{background:var(--pine-tint);color:var(--pine)}
+.chip.mempool{background:var(--amber-tint);color:#7a4f08}
+.chip.rejected{background:var(--red-tint);color:var(--red)}
+.io{width:100%;border-collapse:collapse;font-size:13.5px}
+.io td{padding:5px 0;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+.io td.r{text-align:right;white-space:nowrap;padding-left:12px}
+.insp h3{font:600 17px/1.25 var(--display);margin:0 0 6px}
+.insp dl{margin:12px 0 0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13.5px}
+.insp dt{color:var(--steel)}
+.insp dd{margin:0}
+.insp .err{background:var(--red-tint);color:var(--red);padding:8px 10px;border-radius:6px;font-size:13.5px;margin-top:10px}
+
+/* guide */
+.guide{margin:22px 28px 0;background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:12px 20px}
+.guide summary{font:600 16px var(--display);color:var(--ink);letter-spacing:.02em}
+.recipes{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px;margin:12px 0 6px}
+.recipes h4{margin:0 0 4px;font-size:14.5px}
+.recipes p{margin:0;font-size:13.5px;color:var(--steel)}
+
+/* overlay + toast */
+.overlay{position:fixed;inset:0;background:var(--paper);display:flex;align-items:center;justify-content:center;z-index:10;padding:24px}
+.overlay .box{max-width:460px}
+.overlay h2{font:600 30px/1.15 var(--display);margin:0 0 10px}
+.loading{height:6px;background:var(--rule-soft);border-radius:3px;overflow:hidden;margin-top:18px}
+.loading i{display:block;height:100%;width:30%;background:var(--pine);animation:slide 1.4s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
+.toast{position:fixed;right:24px;bottom:24px;max-width:380px;background:var(--ink);color:#fff;padding:12px 16px;border-radius:8px;font-size:14px;z-index:20;box-shadow:0 6px 24px rgba(23,33,43,.25)}
+.toast.err{background:var(--red)}
+[hidden]{display:none!important}
+.busy{cursor:progress}
+
+@media (max-width:1100px){
+  main{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  main .vault{grid-column:1 / -1;order:-1}
+  .lower{grid-template-columns:1fr}
+}
+@media (max-width:680px){
+  main{grid-template-columns:minmax(0,1fr);padding:16px}
+  header{padding:14px 16px;gap:14px}
+  .brand{min-width:0;flex-direction:column;gap:4px}
+  .chain{width:100%}
+  .mine{flex-wrap:wrap}
+  .mine .btn{flex:1 1 auto}
+  .lower{padding:0 16px 32px}
+  .guide{margin:16px 16px 0}
+  .ticks{grid-template-columns:repeat(48,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="overlay" id="overlay">
+  <div class="box">
+    <h2>Starting your private test chain</h2>
+    <p class="muted" id="progress">Starting the Bitcoin node…</p>
+    <div class="loading"><i></i></div>
+    <p class="small muted" style="margin-top:18px">Everything runs on this computer. The coins are test coins with no value.</p>
+  </div>
+</div>
+
+<header>
+  <div class="brand">
+    <h1>Castlekeep</h1>
+    <p>Trade from a vault the exchange can't empty. Running on a private test chain.</p>
+  </div>
+  <div class="chain">
+    <div class="height"><b id="height">–</b><span id="mempool">Block height</span></div>
+    <div class="mine" role="group" aria-label="Mine blocks">
+      <button class="btn" data-mine="1">Mine 1 block</button>
+      <button class="btn" data-mine="10">Mine 10</button>
+      <button class="btn" data-mine="144" title="144 blocks is about one day on the real network">Mine 144 (1 day)</button>
+    </div>
+  </div>
+</header>
+
+<details class="guide" id="guide" open>
+  <summary>Things to try</summary>
+  <div class="recipes">
+    <div><h4>A normal trade</h4><p>Lock 1 BTC, mine a block, sell 0.6 BTC, then settle and mine a block. Your unsold BTC returns with no waiting.</p></div>
+    <div><h4>The exchange disappears</h4><p>Lock and confirm, set the exchange to offline, request an exit, mine a block. Try to claim (refused), mine 144, then claim.</p></div>
+    <div><h4>Try to undo a sale</h4><p>Sell at $65,000, raise the price to $70,000, request an exit and mine a block. The exchange publishes the sale you already signed.</p></div>
+    <div><h4>A malicious exchange</h4><p>Sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit and mine a block. This shows the gap version 2 closes.</p></div>
+    <div><h4>Attempted theft</h4><p>With a vault open, press "Have the exchange try to steal". The node refuses: your signature is missing.</p></div>
+  </div>
+</details>
+
+<main>
+  <!-- wallet -->
+  <section class="panel" aria-labelledby="w-h">
+    <h2 id="w-h">Your wallet</h2>
+    <p class="sub">Coins only you control.</p>
+    <div class="figure" id="wallet">–</div>
+    <p class="hint" id="walletPending"></p>
+    <button class="btn block" id="faucet" style="margin-top:12px">Get 1 test BTC</button>
+    <hr class="divider">
+    <label for="lockAmt">Lock into a new vault</label>
+    <div class="field">
+      <input id="lockAmt" type="number" min="0.001" step="0.1" value="1" inputmode="decimal" aria-describedby="lockHint">
+      <button class="btn primary" id="lock">Lock BTC</button>
+    </div>
+    <p class="hint" id="lockHint">Opens a vault that needs your key and the exchange's to move.</p>
+    <hr class="divider">
+    <h2 style="font-size:16px">Cash on the exchange</h2>
+    <div class="figure" style="font-size:24px" id="cash">$0</div>
+    <p class="hint">Proceeds from sales. The exchange holds this like any normal account; only the BTC side is self-custodied.</p>
+  </section>
+
+  <!-- vault -->
+  <section class="vault" aria-labelledby="v-h" id="vaultPanel"></section>
+
+  <!-- exchange -->
+  <section class="panel" aria-labelledby="x-h">
+    <h2 id="x-h">Exchange</h2>
+    <p class="sub">The order book and the other key holder.</p>
+    <label for="priceInput">BTC price (USD)</label>
+    <div class="price">
+      <span class="figure" id="price">–</span>
+    </div>
+    <div class="field" style="margin-top:8px">
+      <button class="btn" style="flex:1" data-price="-1000" aria-label="Lower price by 1,000 dollars">−$1,000</button>
+      <button class="btn" style="flex:1" data-price="1000" aria-label="Raise price by 1,000 dollars">+$1,000</button>
+    </div>
+    <div class="field" style="margin-top:8px">
+      <input id="priceInput" type="number" min="1000" step="500" placeholder="e.g. 70000" aria-label="New price in dollars">
+      <button class="btn" id="setPrice">Set price</button>
+    </div>
+    <hr class="divider">
+    <label>Place an order</label>
+    <div class="seg" role="group" aria-label="Order side">
+      <button aria-pressed="true" data-side="sell">Sell</button>
+      <button aria-pressed="false" data-side="buy">Buy back</button>
+    </div>
+    <div class="field" style="margin-top:10px">
+      <input id="orderAmt" type="number" min="0" step="0.1" value="0.6" inputmode="decimal" aria-label="Amount in BTC">
+      <span class="muted" style="align-self:center">BTC</span>
+    </div>
+    <p class="hint" id="orderEst"></p>
+    <button class="btn primary block" id="order" style="margin-top:10px">Sign and sell</button>
+    <p class="hint">You sign the new vault state before the order is sent, so a filled trade can't be undone.</p>
+    <hr class="divider">
+    <label>How the exchange behaves</label>
+    <div class="seg" role="group" aria-label="Exchange behaviour" id="modes">
+      <button data-mode="honest">Honest</button>
+      <button data-mode="offline">Offline</button>
+      <button data-mode="malicious">Malicious</button>
+    </div>
+    <p class="mode-desc" id="modeDesc"></p>
+    <button class="btn danger block" id="steal">Have the exchange try to steal</button>
+    <hr class="divider">
+    <p class="small muted" style="margin:0">Exchange wallet holds <span class="num" id="exchWallet">0 BTC</span> paid out for buyers.</p>
+  </section>
+</main>
+
+<div class="lower">
+  <section class="panel" aria-labelledby="a-h">
+    <h2 id="a-h">Activity</h2>
+    <p class="sub">Newest first. Every accepted or refused transaction came from the Bitcoin node itself.</p>
+    <ol class="log" id="log" aria-live="polite"></ol>
+  </section>
+  <section class="panel insp" aria-labelledby="i-h">
+    <h2 id="i-h">Transaction inspector</h2>
+    <p class="sub">Pick a transaction to see what it spends and which script unlocked it.</p>
+    <div id="inspector"><p class="muted small">No transaction selected yet.</p></div>
+    <ul class="txlist" id="txlist"></ul>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let S = null, side = "sell", selectedTx = null, busy = false;
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const btc = (sats, dp = 8) => {
+  let s = (sats / 1e8).toFixed(dp);
+  if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  return s + " BTC";
+};
+const usd = n => "$" + Math.round(n).toLocaleString("en-US");
+const shortId = t => t ? t.slice(0, 10) + "…" + t.slice(-6) : "";
+const hoursFor = blocks => {
+  const m = blocks * 10;
+  if (m < 60) return `about ${m} minutes`;
+  const h = Math.round(m / 60);
+  return `about ${h} hour${h === 1 ? "" : "s"}`;
+};
+
+const modeText = {
+  honest: "Online. Signs settlements, and if you exit it publishes your latest signed state.",
+  offline: "Gone. Won't take orders, sign settlements or answer an exit request.",
+  malicious: "Refuses to settle. If an exit happens it publishes whichever of your signed states pays it most."
+};
+
+function toast(msg, isErr) {
+  const t = $("toast");
+  t.textContent = msg; t.className = "toast" + (isErr ? " err" : ""); t.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, isErr ? 6000 : 3000);
+}
+
+async function act(body) {
+  if (busy) return;
+  busy = true; document.body.classList.add("busy");
+  document.querySelectorAll("button").forEach(b => b.dataset.wasDisabled = b.disabled ? "1" : "");
+  document.querySelectorAll("button").forEach(b => b.disabled = true);
+  try {
+    const r = await fetch("/api/action", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const j = await r.json();
+    if (j.error) toast(j.error, true);
+    S = j.state; render();
+  } catch (e) {
+    toast("Lost contact with the console. Is the program still running?", true);
+  } finally {
+    busy = false; document.body.classList.remove("busy");
+    document.querySelectorAll("button").forEach(b => b.disabled = b.dataset.wasDisabled === "1");
+    render();
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/state");
+    S = await r.json();
+    if (!busy) render();
+  } catch (e) {}
+  setTimeout(poll, S && S.ready ? 2500 : 700);
+}
+
+function statusInfo(v) {
+  switch (v.status) {
+    case "funding": return ["wait", "Deposit waiting for a block"];
+    case "open": return ["open", "Open for trading"];
+    case "exit_pending": return ["wait", "Exit request waiting for a block"];
+    case "exit_window": return v.blocksLeft > 0 ? ["wait", "Exit window running"] : ["wait", "Ready to claim alone"];
+    case "closing": return ["closed", "Closing, waiting for a block"];
+    case "closed": return ["closed", "Closed"];
+  }
+  return ["", v.status];
+}
+
+function keySvg(color) {
+  return `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="12" r="4.5" fill="none" stroke="${color}" stroke-width="2"/><path d="M12.5 12H21M18 12v3.5M21 12v2.5" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"/></svg>`;
+}
+
+function renderVault() {
+  const el = $("vaultPanel"), v = S.vault;
+  if (!v || (v.status === "closed" && false)) {
+    el.innerHTML = `<h2 id="v-h" style="font:600 22px var(--display);margin:0">Vault</h2>
+      <div class="empty">
+        <svg width="56" height="56" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><path d="M12 8.5v-1M12 16.5v-1M8.5 12h-1M16.5 12h-1" stroke="var(--pine)" stroke-width="1.5"/></svg>
+        <p>No vault open yet. Lock BTC from your wallet to open one, then mine a block to confirm the deposit.</p>
+      </div>`;
+    return;
+  }
+  const [cls, label] = statusInfo(v);
+  const total = v.userSats + v.exchSats || 1;
+  const youPct = 100 * v.userSats / total, buyPct = 100 * v.exchSats / total;
+
+  // exit clock
+  const delay = v.exitDelay;
+  let passed = 0, clockText, clockSub;
+  if (!v.exitSent) {
+    clockText = "Not started";
+    clockSub = "Starts when an exit request confirms. Only needed if the exchange stops cooperating.";
+  } else if (!v.exitHeight) {
+    clockText = "Waiting for the exit request to confirm";
+    clockSub = "Mine a block to start the clock.";
+  } else {
+    passed = delay - v.blocksLeft;
+    clockText = v.blocksLeft > 0 ? `${passed} of ${delay} blocks passed` : `All ${delay} blocks passed`;
+    clockSub = v.blocksLeft > 0
+      ? `${v.blocksLeft} more before you can claim alone. That's ${hoursFor(v.blocksLeft)} on the real network.`
+      : "You can now claim the coins without the exchange.";
+  }
+  if (v.closeKind === "published") clockSub = "The exchange answered inside the window by publishing a signed state.";
+  if (v.closeKind === "claimed") clockSub = "You claimed the coins alone after the clock ran out.";
+  const done = v.exitSent && v.exitHeight && v.blocksLeft === 0;
+  const ticks = Array.from({length: delay}, (_, i) => `<i class="${i < passed ? "on" : ""}"></i>`).join("");
+
+  const closed = v.status === "closed" || v.status === "closing";
+  const canSettle = v.status === "open";
+  const canExit = v.status === "open";
+  const canClaim = v.exitSent && !v.closeTxid;
+
+  const closedNote = {
+    settled: "Settled with the exchange. Your share went back to your wallet.",
+    claimed: "You claimed the whole vault alone after the exit window.",
+    published: "The exchange closed the vault by publishing a state you had signed."
+  }[v.closeKind] || "";
+
+  const rows = v.states.slice().reverse().map((s, i) => `
+    <tr class="${i === 0 ? "latest" : ""}"><td>${s.index}</td><td>${esc(s.label)}</td>
+    <td class="r">${btc(s.userSats, 4)}</td><td class="r">${btc(s.exchSats, 4)}</td></tr>`).join("");
+
+  el.innerHTML = `
+    <div class="vault-head">
+      <div><h2 id="v-h" style="font:600 22px var(--display);margin:0">Vault</h2>
+      <div class="small muted">Locked <span class="num">${btc(v.locked)}</span></div></div>
+      <span class="status ${cls}">${label}</span>
+    </div>
+    <div class="keys" aria-label="Keys that must sign">
+      <span class="key">${keySvg("var(--pine)")}Your key</span>
+      <span class="key">${keySvg("var(--slate)")}Exchange key</span>
+    </div>
+    <p class="keys-note">Both keys must sign to move these coins. The only exception is you alone, after the exit clock runs out.</p>
+    ${closed && closedNote ? `<p class="small" style="margin:-6px 0 14px;color:var(--slate)">${closedNote}</p>` : ""}
+    <div class="split-top"><span class="small muted">Latest signed split</span></div>
+    <div class="bar" role="img" aria-label="Yours ${btc(v.userSats)}, owed to buyers ${btc(v.exchSats)}">
+      <i class="you" style="width:${youPct}%"></i><i class="buy" style="width:${buyPct}%"></i>
+    </div>
+    <div class="legend">
+      <span style="--c:var(--pine)">Yours <b class="num">${btc(v.userSats)}</b></span>
+      <span style="--c:var(--slate)">Owed to buyers <b class="num">${btc(v.exchSats)}</b></span>
+    </div>
+
+    <div class="clock" aria-labelledby="clock-h">
+      <div class="clock-head"><h3 id="clock-h">Exit clock</h3><span class="small">${clockText}</span></div>
+      <div class="ticks ${!v.exitSent ? "idle" : ""} ${done ? "done" : ""}" role="progressbar" aria-valuemin="0" aria-valuemax="${delay}" aria-valuenow="${passed}" aria-label="Exit clock">${ticks}</div>
+      <div class="clock-foot"><span>Exit request confirms</span><span>${delay} blocks, about 24 hours</span></div>
+      <p class="hint" style="margin-top:8px">${clockSub}</p>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="settle" ${canSettle ? "" : "disabled"}>Settle with the exchange</button>
+      <button class="btn amber" id="exit" ${canExit ? "" : "disabled"}>Request exit</button>
+      <button class="btn" id="claim" ${canClaim ? "" : "disabled"}>Claim alone</button>
+    </div>
+    <p class="hint">${v.status === "funding" ? "Mine a block to confirm your deposit before trading." :
+      v.status === "open" ? "Settling is instant when the exchange cooperates. Request exit if it won't." : ""}</p>
+
+    <hr class="divider">
+    <h3 style="font:600 16px var(--display);margin:0 0 2px;letter-spacing:.02em">States you've signed</h3>
+    <p class="hint" style="margin:0 0 6px">Each trade creates a new split that you sign before the order is sent. The highlighted row is the latest.</p>
+    <table class="states"><thead><tr><th>#</th><th>What happened</th><th class="r">Yours</th><th class="r">Owed to buyers</th></tr></thead><tbody>${rows}</tbody></table>
+
+    <details style="margin-top:14px"><summary>Show the vault's scripts</summary>
+      <p class="small muted" style="margin:10px 0 4px">Vault address</p><pre class="mono">${esc(v.address)}</pre>
+      <p class="small muted" style="margin:10px 0 4px">Both must sign (vault and exit output)</p><pre class="mono">${esc(v.scriptVault)}</pre>
+      <p class="small muted" style="margin:10px 0 4px">You alone, 144 blocks after the exit request</p><pre class="mono">${esc(v.scriptExit)}</pre>
+    </details>`;
+
+  $("settle").onclick = () => act({action: "settle"});
+  $("exit").onclick = () => act({action: "exit", by: "user"});
+  $("claim").onclick = () => act({action: "claim"});
+}
+
+function renderLog() {
+  const items = S.events.slice().reverse().map(e => `
+    <li class="${e.kind}"><div class="t">${esc(e.title)}</div>
+    ${e.detail ? `<div class="d">${esc(e.detail)}</div>` : ""}
+    <div class="m"><span>Block ${e.height}, ${e.time}</span>
+    ${e.txid ? `<button class="link" data-tx="${e.txid}">Inspect transaction</button>` : ""}</div></li>`).join("");
+  const log = $("log");
+  if (log.dataset.count !== String(S.events.length)) { log.innerHTML = items; log.dataset.count = S.events.length; }
+}
+
+function renderTxs() {
+  const txs = S.txs || [];
+  if (!selectedTx && txs.length) selectedTx = txs[0].txid;
+  $("txlist").innerHTML = txs.map(t => `<li><button data-tx="${t.txid}" aria-current="${t.txid === selectedTx}">
+    <span>${esc(t.label)}</span><span class="chip ${t.status}">${t.status === "mempool" ? "waiting" : t.status}</span></button></li>`).join("");
+  const t = txs.find(x => x.txid === selectedTx);
+  if (!t) return;
+  const refText = ref => { const i = ref.lastIndexOf(":"); return i > 0 ? shortId(ref.slice(0, i)) + ref.slice(i) : shortId(ref); };
+  const ioRows = list => list.map(io => `<tr><td>${esc(io.label)}<div class="mono muted">${esc(refText(io.ref))}</div></td><td class="r num">${io.sats ? btc(io.sats) : ""}</td></tr>`).join("");
+  $("inspector").innerHTML = `
+    <h3>${esc(t.label)}</h3>
+    <span class="chip ${t.status}">${t.status === "mempool" ? "Waiting in the mempool" : t.status === "confirmed" ? "Confirmed in block " + t.height : "Rejected by the node"}</span>
+    ${t.error ? `<div class="err">${esc(t.error)}</div>` : ""}
+    <dl><dt>Transaction ID</dt><dd class="mono">${esc(t.txid)}</dd>
+    <dt>Unlocked by</dt><dd>${esc(t.path)}</dd></dl>
+    ${t.script ? `<p class="small muted" style="margin:12px 0 4px">Script used</p><pre class="mono" style="background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:8px;white-space:pre-wrap;margin:0">${esc(t.script)}</pre>` : ""}
+    <p class="small muted" style="margin:14px 0 2px">Spends</p><table class="io">${ioRows(t.inputs)}</table>
+    <p class="small muted" style="margin:14px 0 2px">Creates</p><table class="io">${ioRows(t.outputs)}</table>`;
+}
+
+function render() {
+  if (!S) return;
+  $("overlay").hidden = S.ready && !S.initErr;
+  if (!S.ready || S.initErr) {
+    $("progress").textContent = S.initErr ? "Couldn't start: " + S.initErr : S.progress;
+    return;
+  }
+  $("height").textContent = "Block " + S.height.toLocaleString("en-US");
+  $("mempool").textContent = S.mempool ? `${S.mempool} transaction${S.mempool === 1 ? "" : "s"} waiting for a block` : "Nothing waiting for a block";
+  $("wallet").innerHTML = `${btc(S.walletSats)}`;
+  $("walletPending").textContent = S.walletPending ? `Plus ${btc(S.walletPending)} waiting for a block` : "";
+  $("cash").textContent = usd(S.cashCents / 100);
+  $("price").textContent = usd(S.price);
+  $("exchWallet").textContent = btc(S.exchWalletSats);
+  document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === S.mode)));
+  $("modeDesc").textContent = modeText[S.mode];
+  const amt = parseFloat($("orderAmt").value) || 0;
+  $("orderEst").textContent = amt > 0 ? (side === "sell" ? `You'd receive about ${usd(amt * S.price)}.` : `That would cost about ${usd(amt * S.price)}.`) : "";
+  $("order").textContent = side === "sell" ? "Sign and sell" : "Sign and buy back";
+  if (!busy) {
+    const v = S.vault, open = v && v.status === "open";
+    $("order").disabled = !open;
+    $("steal").disabled = !v || v.status === "closed" || v.status === "closing";
+    $("lock").disabled = !!(v && !v.closeTxid);
+    $("lockHint").textContent = v && !v.closeTxid
+      ? "Close your current vault first: settle it, or exit and claim."
+      : "Opens a vault that needs your key and the exchange's to move.";
+  }
+  renderVault(); renderLog(); renderTxs();
+}
+
+document.querySelectorAll("[data-mine]").forEach(b => b.onclick = () => act({action: "mine", n: +b.dataset.mine}));
+document.querySelectorAll("[data-price]").forEach(b => b.onclick = () => act({action: "price", usd: S.price + +b.dataset.price}));
+$("setPrice").onclick = () => { const v = parseInt($("priceInput").value, 10); if (v) act({action: "price", usd: v}); };
+$("priceInput").onkeydown = e => { if (e.key === "Enter") $("setPrice").click(); };
+$("faucet").onclick = () => act({action: "faucet"});
+$("lock").onclick = () => act({action: "lock", sats: Math.round((parseFloat($("lockAmt").value) || 0) * 1e8)});
+$("order").onclick = () => act({action: "order", side, sats: Math.round((parseFloat($("orderAmt").value) || 0) * 1e8)});
+$("orderAmt").oninput = render;
+$("steal").onclick = () => act({action: "steal"});
+document.querySelectorAll("[data-side]").forEach(b => b.onclick = () => {
+  side = b.dataset.side;
+  document.querySelectorAll("[data-side]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  render();
+});
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => act({action: "mode", mode: b.dataset.mode}));
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tx]");
+  if (!t) return;
+  selectedTx = t.dataset.tx; renderTxs();
+  if (t.classList.contains("link")) document.querySelector(".insp").scrollIntoView({behavior: "smooth", block: "start"});
+});
+poll();
+</script>
+</body>
+</html>
