@@ -1,0 +1,39 @@
+Castlekeep prototype — local regtest chain (test coins only)
+Mining 500 blocks to activate CSV, SegWit and Taproot…
+  csv      active
+  segwit   active
+  taproot  active
+
+=== A. Happy path: lock, trade, settle ===
+  • User locks 1.00000000 BTC into the 2-of-2 vault (block 501). Exit request pre-signed by both.
+  • User places a sell order for 0.6 BTC at $65,000 and signs the post-trade state up front.
+  • Order fills instantly on the exchange's book (off-chain).
+  ✔ Cooperative settlement accepted by the node (accepted)
+  ✔ User received 0.39999000 BTC back in their own wallet
+  ✔ Exchange received 0.60000000 BTC for the buyer
+  ✔ Vault is closed; no waiting period was needed
+
+=== B. Exchange disappears: exit request + 144-block window ===
+  • User locks 1.00000000 BTC. Then the exchange goes offline and stops signing.
+  ✔ User broadcasts the pre-signed exit request on their own (accepted)
+  ✔ Claim after only 50 blocks is REJECTED by consensus (node: relative timelock not yet satisfied)
+  ✔ Claim accepted once 144 blocks had passed since the exit request (accepted)
+  ✔ User holds 0.99998000 BTC again, with no help from the exchange
+
+=== C. Reversal attack: sell at $65k, price jumps to $70k, try to keep the coins ===
+  • User locks 1.00000000 BTC and sells 0.6 BTC at $65,000 (state pre-signed at order placement).
+  • BTC rises to $70,000. User refuses to settle and broadcasts the exit request instead.
+  ✔ Exit request confirmed; the 144-block response window starts (accepted)
+  • Exchange watchtower sees the exit request and publishes the latest state the user signed.
+  ✔ Exchange's settlement accepted inside the window (accepted)
+  ✔ Buyer's 0.6 BTC goes to the exchange: 0.59999400 BTC
+  ✔ User keeps only the unsold 0.4 BTC: 0.39998600 BTC
+  ✔ User's attempt to claim the whole vault after 144 blocks is REJECTED (node: the exit output was already spent by the exchange's settlement)
+
+=== D. Exchange tries to take the coins on its own ===
+  • User locks 1.00000000 BTC. The exchange signs a transaction paying everything to itself.
+  ✔ Exchange-only spend REJECTED by consensus (node: script check failed, missing a valid user signature)
+  ✔ Signing twice with the exchange key is also REJECTED (node: script check failed, missing a valid user signature)
+  ✔ Vault still holds the user's 1.00000000 BTC
+
+All checks passed. Every result above was enforced by Bitcoin consensus rules on a real node.
