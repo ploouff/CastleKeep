@@ -32,19 +32,33 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 Vault V  (Taproot, NUMS internal key, so no key path)
   └─ <user> CHECKSIGVERIFY <exch> CHECKSIG
 Exit E   (reached by the exit request V -> E, pre-signed by both when the vault opens)
-  ├─ <user> CHECKSIGVERIFY <exch> CHECKSIG          exchange publishes a state payout
-  └─ <delay> CSV DROP <user> CHECKSIG                 user alone after 144 (BTC) / 576 (LTC) blocks
-State n payout from E: user share -> user wallet; exchange share -> revocable output R_n
-R_n      (Taproot, NUMS internal key)
-  ├─ <D2> CSV DROP <exch> CHECKSIG                    exchange claims after 6 (BTC) / 24 (LTC) blocks
-  └─ SHA256 <H(r_n)> EQUALVERIFY <user> CHECKSIG      user sweeps with revocation secret r_n
+  ├─ <user> CHECKSIGVERIFY <exch> CHECKSIG                    either side publishes a state payout
+  └─ <delay> CSV DROP <user> CHECKSIGVERIFY <exch> CHECKSIG   pre-signed pay-back of deposits after
+                                                               144 (BTC) / 576 (LTC) blocks
+State n has two payouts from E, both signed by both sides:
+  exchange's copy: user share -> user wallet;   exchange share -> R_n
+  user's copy:     exchange share -> exchange;  user share     -> U_n
+R_n  ├─ <D2> CSV DROP <exch> CHECKSIG                 exchange claims after 6 (BTC) / 24 (LTC) blocks
+     └─ SHA256 <H(r_n)> EQUALVERIFY <user> CHECKSIG   user sweeps with the exchange's secret r_n
+U_n  ├─ <D2> CSV DROP <user> CHECKSIG                 user claims after D2
+     └─ SHA256 <H(u_n)> EQUALVERIFY <exch> CHECKSIG   exchange sweeps with the user's secret u_n
 ```
 
-- The user signs each state's payout **at order placement**, so a trade can't be undone.
-- The exchange picks a random secret r_n per state and gives H(r_n) when the state is
-  signed. When state n+1 is signed, it hands the user r_n (state n is now "revoked").
+- The user signs the exchange's copy **at order placement**, so a trade can't be undone.
+  The exchange signs the user's copy on the fill.
+- Each side picks a random secret per state and gives the other its hash. When state n+1
+  is signed, both hand over their secret for state n (it is now "revoked"; `revealed`).
 - If the exchange publishes a revoked state, the user's watchtower sweeps R_n with r_n
-  before D2 expires ("penalty sweep"), so the user ends up with the whole vault.
+  ("penalty sweep", `sweepKind` "penalty"). If the user publishes one (the "cheat"
+  action), the exchange's watchtower sweeps U_n with u_n ("exchange-penalty").
+- Claim alone = the pre-signed pay-back of deposits (`refundTx`). With no exchange deposit
+  that is the whole vault to the user, as before. The user's watchtower publishes the
+  latest state during the window if it pays the user more than their deposit.
+- Buying capacity ("capacity" action, `addCapacity` + `spliceTx`): one tx signed by both
+  spends V plus exchange wallet coins into a bigger V (same scripts), re-signs exit and
+  pay-back (`applySplice`), bumps `v.gen` (states from older gens can't be published) and
+  signs a new state (fee 0.2% from the user's share). The exchange wallet starts with 20
+  coins (`exchangeStock`); the snapshot reports the change from that.
 - Cooperative settlement spends V directly with both signatures (no revocation needed).
 
 **Ethereum (`eth.go`, `CastleVault.sol`)**: both sides sign every state (nonce = state

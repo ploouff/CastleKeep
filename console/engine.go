@@ -114,6 +114,7 @@ type VaultView struct {
 	Revocation     bool   `json:"revocation"`
 	PenaltyDelay   int64  `json:"penaltyDelay,omitempty"`
 	PublishedState int    `json:"publishedState"`
+	PublishedBy    string `json:"publishedBy,omitempty"` // "exchange" or "user"
 	SweepKind      string `json:"sweepKind,omitempty"`
 	SweepTxid      string `json:"sweepTxid,omitempty"`
 }

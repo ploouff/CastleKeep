@@ -110,6 +110,22 @@ func TestSwap(t *testing.T) {
 		eth.doUserErr(ActionReq{Action: "order", Side: "buy", Sats: 3_000_000}, "you have $25 in cash")
 	})
 
+	t.Run("SwapIntoNewLTC", func(t *testing.T) {
+		btc.t, ltc.t = t, t
+		// The exchange adds 1 LTC to the Litecoin vault, so you can now buy
+		// LTC you never sold. 0.05 BTC at $65,000 = $3,250 = 0.5 LTC at $6,500.
+		ltc.do(ActionReq{Action: "capacity", Sats: oneCoin})
+		ltc.mine(1)
+		ltcShare := int64(80_000_000) - capacityFee(oneCoin)
+		ltc.userShare(ltcShare)
+		bShare := btc.vault().UserSats
+		if err := btc.swapTo(ltc, 5_000_000); err != nil {
+			t.Fatal(err)
+		}
+		ltc.userShare(ltcShare + 50_000_000)
+		btc.userShare(bShare - 5_000_000)
+	})
+
 	t.Run("AccountOverview", func(t *testing.T) {
 		btc.t = t
 		v := accountView(testAcct, []Engine{btc.e, ltc.e, eth.e})

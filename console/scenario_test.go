@@ -262,6 +262,13 @@ func runUTXOScenarios(t *testing.T, chain string) {
 	t.Run("MaliciousOldStatePenaltySweep", func(t *testing.T) { utxoMaliciousOldState(newHarness(t, chain)) })
 	t.Run("MaliciousOldStateWatchtowerOff", func(t *testing.T) { utxoMaliciousWatchtowerOff(newHarness(t, chain)) })
 	t.Run("TheftRefused", func(t *testing.T) { utxoTheft(newHarness(t, chain)) })
+	t.Run("UserPublishesOldStatePenalized", func(t *testing.T) { utxoUserCheats(newHarness(t, chain)) })
+	t.Run("UserOldStateExchangeNotWatching", func(t *testing.T) { utxoUserCheatsUnwatched(newHarness(t, chain)) })
+	t.Run("BuyNewCoins", func(t *testing.T) { utxoBuyNew(newHarness(t, chain)) })
+	t.Run("BoughtCoinsKeptWhenExchangeOffline", func(t *testing.T) { utxoBoughtOffline(newHarness(t, chain)) })
+	t.Run("BoughtCoinsLostWithWatchtowerOff", func(t *testing.T) { utxoBoughtWatchtowerOff(newHarness(t, chain)) })
+	t.Run("DepositsPaidBackBeforeBuying", func(t *testing.T) { utxoDepositsBack(newHarness(t, chain)) })
+	t.Run("MaliciousAfterCapacityPenalty", func(t *testing.T) { utxoMaliciousAfterCapacity(newHarness(t, chain)) })
 }
 
 func utxoLock(h *harness) {
@@ -294,6 +301,7 @@ func utxoOffline(h *harness) {
 	h.expectEvent("Settlement request got no answer")
 	h.do(ActionReq{Action: "exit"})
 	h.expectAccepted("exit request")
+	h.doUserErr(ActionReq{Action: "cheat"}, "nothing to gain")
 	h.mine(1)
 	h.expectStatus("exit_window")
 	delay := int(h.vault().ClockTotal)
@@ -492,7 +500,9 @@ func ethFundCapacityAndBuy(h *harness) {
 	if v.ExchDeposit != oneCoin || v.Locked != 2*oneCoin {
 		h.t.Fatalf("after funding: exchange deposit %d, locked %d", v.ExchDeposit, v.Locked)
 	}
-	h.do(ActionReq{Action: "cash"})
+	for cost := orderCost(80_000_000, h.snap().Price); testAcct.Cash() < cost; {
+		h.do(ActionReq{Action: "cash"})
+	}
 	h.order("buy", 80_000_000)
 	if u := h.vault().UserSats; u != 179_800_000 {
 		h.t.Fatalf("your share after buying: %s, want 1.798", fmtCoin(u, "ETH"))
@@ -654,4 +664,198 @@ func utxoMaliciousWatchtowerOff(h *harness) {
 		h.t.Fatal("penalty sweep after the exchange already collected")
 	}
 	h.approx("wallet change", h.wallet()-w0, -50_000_000-3*txFee, 1500)
+}
+
+// utxoUserCheats: revocation works both ways. The user publishes their copy
+// of state #0 (before the sale); the exchange's watchtower holds the user's
+// secret #0 and takes the user's whole share.
+func utxoUserCheats(h *harness) {
+	w0, exch0 := h.wallet(), h.snap().ExchSats
+	utxoLock(h)
+	h.doUserErr(ActionReq{Action: "cheat"}, "Request an exit first")
+	h.order("sell", 60_000_000)
+	h.do(ActionReq{Action: "exit"})
+	h.do(ActionReq{Action: "cheat"}) // published in the same block as the exit
+	h.expectAccepted("user publishing old state #0")
+	h.expectEvent("You published an OLD state (#0, not #1)")
+	h.expectEvent("The exchange holds your revocation secret #0")
+	h.mine(1)
+	h.expectEvent("Penalty sweep: the exchange's watchtower took your")
+	if h.hasEvent("Exchange watchtower published") {
+		h.t.Fatal("the exchange published after the user already had")
+	}
+	h.mine(1)
+	v := h.vault()
+	if v.Status != "closed" || v.SweepKind != "exchange-penalty" || v.PublishedBy != "user" {
+		h.t.Fatalf("status %q, sweep %q, published by %q", v.Status, v.SweepKind, v.PublishedBy)
+	}
+	// The user loses the whole vault; the exchange gets it less three fees.
+	h.approx("wallet change", h.wallet()-w0, -oneCoin-txFee, 1500)
+	h.approx("exchange wallet change", h.snap().ExchSats-exch0, oneCoin-3*txFee, 0)
+}
+
+// utxoUserCheatsUnwatched: with the exchange offline, nobody uses the
+// user's secret, so after D2 the user collects and the old state stands.
+// It shows the exchange has to watch the chain too.
+func utxoUserCheatsUnwatched(h *harness) {
+	w0 := h.wallet()
+	utxoLock(h)
+	h.order("sell", 60_000_000)
+	h.do(ActionReq{Action: "mode", Mode: "offline"})
+	h.do(ActionReq{Action: "exit"})
+	h.do(ActionReq{Action: "cheat"})
+	h.expectAccepted("user publishing old state #0")
+	h.mine(1)
+	if h.hasEvent("Penalty sweep") {
+		h.t.Fatal("an offline exchange swept the user's share")
+	}
+	h.mine(int(h.vault().PenaltyDelay) - 1)
+	h.expectEvent("You collected your")
+	h.expectEvent("The exchange didn't use your revocation secret in time")
+	h.mine(1)
+	if k := h.vault().SweepKind; k != "user" {
+		h.t.Fatalf("sweep kind %q, want user", k)
+	}
+	// The whole vault comes back, less lock, exit, payout and collect fees.
+	h.approx("wallet change", h.wallet()-w0, -4*txFee, 1500)
+}
+
+// ------------------------------------------------------------------ buying new coins (BTC/LTC)
+
+// utxoFund opens a 1-coin vault and has the exchange add 1 coin of its own
+// (a splice). Your share becomes 0.998 after the 0.2% fee.
+func utxoFund(h *harness) {
+	h.t.Helper()
+	utxoLock(h)
+	h.do(ActionReq{Action: "capacity", Sats: oneCoin})
+	h.expectAccepted("exchange adding coins")
+	h.expectStatus("funding")
+	h.mine(1)
+	h.expectStatus("open")
+	v := h.vault()
+	if v.ExchDeposit != oneCoin || v.UserDeposit != oneCoin || v.Locked != 2*oneCoin {
+		h.t.Fatalf("after the splice: deposits %d/%d, locked %d", v.UserDeposit, v.ExchDeposit, v.Locked)
+	}
+	if v.UserSats != oneCoin-capacityFee(oneCoin) {
+		h.t.Fatalf("your share after the fee: %d", v.UserSats)
+	}
+}
+
+func (h *harness) buy08() {
+	h.t.Helper()
+	for cost := orderCost(80_000_000, h.snap().Price); testAcct.Cash() < cost; {
+		h.do(ActionReq{Action: "cash"})
+	}
+	h.order("buy", 80_000_000)
+	if u := h.vault().UserSats; u != 179_800_000 {
+		h.t.Fatalf("your share after buying 0.8: %d, want 1.798", u)
+	}
+}
+
+func utxoBuyNew(h *harness) {
+	w0, x0 := h.wallet(), h.snap().ExchSats
+	utxoLock(h)
+	h.doUserErr(ActionReq{Action: "order", Side: "buy", Sats: 10_000_000}, "Ask the exchange to lock buying capacity")
+	h.do(ActionReq{Action: "capacity", Sats: oneCoin})
+	h.mine(1)
+	h.buy08()
+	h.doUserErr(ActionReq{Action: "order", Side: "buy", Sats: 30_000_000}, "the most you can buy")
+	// A state from before the splice spends an exit output that can't exist.
+	h.tryUTXO("Publish a state from before the splice", func(v *Vault) *wire.MsgTx { return v.publishState(v.States[0]) })
+	h.expectRejected("pre-splice state", "")
+	// A second top-up works too.
+	h.do(ActionReq{Action: "capacity", Sats: oneCoin / 2})
+	h.mine(1)
+	if v := h.vault(); v.ExchDeposit != 3*oneCoin/2 || v.ExchSats != 20_200_000+oneCoin/2+capacityFee(oneCoin/2) {
+		h.t.Fatalf("after a second top-up: exchange deposit %d, exchange side %d", v.ExchDeposit, v.ExchSats)
+	}
+	h.do(ActionReq{Action: "settle"})
+	h.expectAccepted("settlement")
+	h.mine(1)
+	// You get 1.797 back for the 1 you locked (1.798 less the second 0.001
+	// fee), less lock and settle fees.
+	h.approx("wallet change", h.wallet()-w0, 79_700_000-2*txFee, 1500)
+	// The exchange sold 0.8 and earned 0.003 in fees (and paid two splice fees).
+	h.approx("exchange wallet change", h.snap().ExchSats-x0, -79_700_000-2*txFee, 1500)
+}
+
+// utxoBoughtOffline: the exchange disappears after you bought. The pay-back
+// would only return deposits, so your watchtower publishes your latest state.
+func utxoBoughtOffline(h *harness) {
+	w0 := h.wallet()
+	utxoFund(h)
+	h.buy08()
+	h.do(ActionReq{Action: "mode", Mode: "offline"})
+	h.do(ActionReq{Action: "exit"})
+	h.mine(1)
+	h.expectEvent("Your watchtower is publishing your latest state")
+	h.expectEvent("Your watchtower published your latest state #2")
+	h.mine(int(h.vault().PenaltyDelay))
+	h.expectEvent("You collected your")
+	h.mine(1)
+	v := h.vault()
+	if v.PublishedBy != "user" || v.SweepKind != "user" {
+		h.t.Fatalf("published by %q, sweep %q", v.PublishedBy, v.SweepKind)
+	}
+	// 1.798 for the 1 locked, less lock, exit, payout and collect fees.
+	h.approx("wallet change", h.wallet()-w0, 79_800_000-4*txFee, 1500)
+}
+
+// utxoBoughtWatchtowerOff: with nobody publishing, the pay-back returns
+// deposits and the coins you bought go back to the exchange.
+func utxoBoughtWatchtowerOff(h *harness) {
+	w0 := h.wallet()
+	utxoFund(h)
+	h.buy08()
+	h.do(ActionReq{Action: "watchtower", On: false})
+	h.do(ActionReq{Action: "mode", Mode: "offline"})
+	h.do(ActionReq{Action: "exit"})
+	h.mine(1)
+	if h.hasEvent("Your watchtower published") {
+		h.t.Fatal("published with the watchtower off")
+	}
+	h.mine(int(h.vault().ClockTotal))
+	h.do(ActionReq{Action: "claim"})
+	h.expectAccepted("pay-back of deposits")
+	h.expectEvent("went back to the exchange")
+	h.mine(1)
+	h.approx("wallet change", h.wallet()-w0, -3*txFee, 1500)
+}
+
+// utxoDepositsBack: the exchange disappears before you bought anything, so
+// each side simply gets its deposit back. The exchange's coins are safe.
+func utxoDepositsBack(h *harness) {
+	w0, x0 := h.wallet(), h.snap().ExchSats
+	utxoFund(h)
+	h.do(ActionReq{Action: "mode", Mode: "offline"})
+	h.do(ActionReq{Action: "exit"})
+	h.mine(1)
+	if h.hasEvent("Your watchtower published") {
+		h.t.Fatal("nothing to publish: your latest share is below your deposit")
+	}
+	h.mine(int(h.vault().ClockTotal))
+	h.do(ActionReq{Action: "claim"})
+	h.expectAccepted("pay-back of deposits")
+	h.mine(1)
+	h.approx("wallet change", h.wallet()-w0, -3*txFee, 1500)
+	h.approx("exchange wallet change", h.snap().ExchSats-x0, -txFee, 1500)
+}
+
+// utxoMaliciousAfterCapacity: the exchange publishes the old state from
+// right after its deposit (where its share was largest). Your watchtower
+// takes that share with the revocation secret, so you get the whole vault,
+// including the exchange's deposit.
+func utxoMaliciousAfterCapacity(h *harness) {
+	w0 := h.wallet()
+	utxoFund(h)
+	h.buy08()
+	h.do(ActionReq{Action: "mode", Mode: "malicious"})
+	h.do(ActionReq{Action: "exit"})
+	h.mine(1)
+	h.expectEvent("Malicious exchange published an OLD state (#1, not #2)")
+	h.mine(1)
+	h.expectEvent("Penalty sweep: your watchtower took the exchange's")
+	h.mine(1)
+	// Both coins come back, less lock, exit, payout and sweep fees.
+	h.approx("wallet change", h.wallet()-w0, oneCoin-4*txFee, 1500)
 }

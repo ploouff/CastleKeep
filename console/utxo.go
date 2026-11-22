@@ -66,8 +66,9 @@ type UTXOEngine struct {
 	userUtxos, exchUtxos   []utxo
 
 	tradeBook
-	userWT bool // the user's watchtower: sweeps revoked states with their secret
-	vault  *Vault
+	userWT   bool  // the user's watchtower: sweeps revoked states with their secret
+	exchBase int64 // the exchange's starting stock; the UI shows the change from it
+	vault    *Vault
 	eventLog
 	txs         map[string]*TxInfo
 	txSeq       int
@@ -182,6 +183,12 @@ func (e *UTXOEngine) start() error {
 			return err
 		}
 	}
+	// The exchange's own stock, which it can lock in vaults as buying capacity.
+	if err := e.faucetTo(e.exchPk, exchangeStock, fmt.Sprintf("Test faucet: %d %s to the exchange's wallet", exchangeStock/unit, e.cfg.Info.Ticker),
+		"The exchange received its test "+e.cfg.Info.Ticker); err != nil {
+		return err
+	}
+	e.exchBase = exchangeStock
 	if _, err := e.rpc.Generate(1); err != nil {
 		return err
 	}
@@ -227,11 +234,14 @@ func (e *UTXOEngine) labelScript(pk []byte) string {
 			return "Vault (you + exchange)"
 		}
 		if string(pk) == string(v.E.pkScript) {
-			return fmt.Sprintf("Exit output (you + exchange, or you alone after %d blocks)", v.delay)
+			return fmt.Sprintf("Exit output (a state both signed, or the pay-back of deposits after %d blocks)", v.delay)
 		}
 		for _, s := range v.States {
 			if string(pk) == string(s.R.pkScript) {
 				return fmt.Sprintf("Exchange's share of state #%d (exchange after %d blocks, or you with revocation secret #%d)", s.Index, v.penaltyDelay, s.Index)
+			}
+			if s.U != nil && string(pk) == string(s.U.pkScript) {
+				return fmt.Sprintf("Your share of state #%d (you after %d blocks, or the exchange with your revocation secret #%d)", s.Index, v.penaltyDelay, s.Index)
 			}
 		}
 	}
@@ -363,6 +373,10 @@ func (e *UTXOEngine) Do(r ActionReq) error {
 		return e.requestExit(r.By)
 	case "claim":
 		return e.claim()
+	case "capacity":
+		return e.addCapacity(r.Sats)
+	case "cheat":
+		return e.userPublishOld()
 	case "steal":
 		return e.steal()
 	case "mode":
@@ -383,6 +397,11 @@ func (e *UTXOEngine) Do(r ActionReq) error {
 }
 
 func (e *UTXOEngine) faucet() error {
+	return e.faucetTo(e.userPk, unit, "Test faucet: 1 "+e.cfg.Info.Ticker+" to your wallet", "Received 1 test "+e.cfg.Info.Ticker)
+}
+
+// faucetTo pays amt from the next mature test coinbase to a wallet script.
+func (e *UTXOEngine) faucetTo(to []byte, amt int64, label, okTitle string) error {
 	if e.height()-e.nextCB < 100 {
 		return userErr("No mature test coins left. Mine 100 blocks and try again.")
 	}
@@ -406,26 +425,25 @@ func (e *UTXOEngine) faucet() error {
 	if err != nil {
 		return err
 	}
-	amt, _ := btcutil.NewAmount(txs[0].Vout[0].Value)
-	prevAmt := int64(amt)
+	cbAmt, _ := btcutil.NewAmount(txs[0].Vout[0].Value)
+	prevAmt := int64(cbAmt)
 	prev := wire.OutPoint{Hash: *cbHash, Index: 0}
 	e.outLabels[prev] = IO{Label: "Test faucet (mined coins)", Sats: prevAmt, Ref: prev.String()}
-	if prevAmt < unit+2*txFee {
+	if prevAmt < amt+2*txFee {
 		return userErr("The next test coinbase is too small. Try again.")
 	}
 
 	tx := wire.NewMsgTx(2)
 	tx.AddTxIn(wire.NewTxIn(&prev, nil, nil))
-	tx.AddTxOut(wire.NewTxOut(unit, e.userPk))
-	tx.AddTxOut(wire.NewTxOut(prevAmt-unit-txFee, e.minerPk))
+	tx.AddTxOut(wire.NewTxOut(amt, to))
+	tx.AddTxOut(wire.NewTxOut(prevAmt-amt-txFee, e.minerPk))
 	hashes := txscript.NewTxSigHashes(tx, txscript.NewCannedPrevOutputFetcher(e.minerPk, prevAmt))
 	wit, err := txscript.TaprootWitnessSignature(tx, hashes, 0, prevAmt, e.minerPk, txscript.SigHashDefault, e.miner)
 	if err != nil {
 		return err
 	}
 	tx.TxIn[0].Witness = wit
-	return e.broadcast(tx, "Test faucet: 1 "+e.cfg.Info.Ticker+" to your wallet", "Faucet key (ordinary key path)", nil,
-		"Received 1 test "+e.cfg.Info.Ticker, "Faucet payment rejected")
+	return e.broadcast(tx, label, "Faucet key (ordinary key path)", nil, okTitle, "Faucet payment rejected")
 }
 
 func (e *UTXOEngine) mine(n int) error {
@@ -489,6 +507,7 @@ func (e *UTXOEngine) lock(sats int64) error {
 	e.vault = v
 	v.vaultOut = wire.OutPoint{Hash: tx.TxHash(), Index: 0}
 	v.vaultAmt = sats
+	v.userDeposit = sats
 	if err := e.broadcast(tx, "Lock "+e.fmt(sats)+" into the vault", "Your wallet key (ordinary key path)", nil,
 		"Locked "+e.fmt(sats)+" into a new vault", "Vault deposit rejected"); err != nil {
 		e.vault = prevVault
@@ -500,6 +519,70 @@ func (e *UTXOEngine) lock(sats int64) error {
 		fmt.Sprintf("Either side can broadcast it later to start the %d-block clock.", v.delay), "")
 	v.signState("Opening balance", sats, 0, e.height())
 	e.log("sign", "You signed state #0: you own the whole vault", "", "")
+	return nil
+}
+
+// exchangeStock is how many test coins the exchange's wallet starts with.
+const exchangeStock = 20 * unit
+
+// addCapacity: the exchange adds its own coins to the vault (a splice) so
+// the user can buy more than they sold. The fee comes from the user's share.
+func (e *UTXOEngine) addCapacity(sats int64) error {
+	v := e.vault
+	t := e.cfg.Info.Ticker
+	switch st := e.vaultStatus(); st {
+	case "open":
+	case "funding":
+		return userErr("The last deposit into this vault hasn't confirmed yet. Mine a block first.")
+	default:
+		return userErr("Open a vault first, then ask for buying capacity.")
+	}
+	if e.mode == "offline" {
+		return userErr("The exchange is offline and can't lock anything.")
+	}
+	if sats < 100_000 || sats > 5*unit {
+		return userErr("Ask for between 0.001 and 5 %s.", t)
+	}
+	fee := capacityFee(sats)
+	l := v.Latest()
+	if fee > l.UserSats {
+		return userErr("The fee (%s) is more than your share of the vault.", e.fmt(fee))
+	}
+	var ins []utxo
+	var in int64
+	for _, u := range e.exchUtxos {
+		if in >= sats+txFee {
+			break
+		}
+		if _, ok := e.unspent(u.op); !ok {
+			continue
+		}
+		ins = append(ins, u)
+		in += u.amt
+	}
+	if in < sats+txFee {
+		return userErr("The exchange's wallet only holds %s right now.", e.fmt(in))
+	}
+	tx, err := v.spliceTx(ins, e.exchPk, e.exchWallet, sats)
+	if err != nil {
+		return err
+	}
+	for _, u := range ins {
+		e.outLabels[u.op] = IO{Label: "Exchange wallet", Sats: u.amt, Ref: u.op.String()}
+	}
+	e.outLabels[v.vaultOut] = IO{Label: "Vault (you + exchange)", Sats: v.vaultAmt, Ref: v.vaultOut.String()}
+	if err := e.broadcast(tx, fmt.Sprintf("Exchange adds %s to your vault", e.fmt(sats)),
+		"Vault script: both sign, plus the exchange's wallet key for its coins", v.multisigLeaf.Script,
+		fmt.Sprintf("The exchange is adding %s to your vault", e.fmt(sats)), "The exchange's deposit was rejected"); err != nil {
+		return nil
+	}
+	v.applySplice(tx, sats)
+	v.fundTxid = tx.TxHash().String()
+	e.log("sign", "You and the exchange signed a new exit request and pay-back",
+		fmt.Sprintf("The old vault output is spent, so the old exit request and every older state stop working. After an exit window, the pay-back now returns %s to you and %s to the exchange.", e.fmt(v.userDeposit), e.fmt(v.exchDeposit)), "")
+	s := v.signState(fmt.Sprintf("Exchange locked %s (fee %s)", e.fmt(sats), e.fmt(fee)), l.UserSats-fee, l.ExchSats+sats+fee, e.height())
+	e.log("sign", fmt.Sprintf("You both signed state #%d: the exchange's %s is in the vault", s.Index, e.fmt(sats)),
+		fmt.Sprintf("Mine a block to confirm it. You can then buy up to %s from the exchange. The %s fee (0.2%%) came out of your share.", e.fmt(s.ExchSats), e.fmt(fee)), "")
 	return nil
 }
 
@@ -582,7 +665,10 @@ func (e *UTXOEngine) canTrade(side string, sats int64) error {
 		}
 	case "buy":
 		if sats > l.ExchSats {
-			return userErr("You can only buy back %s sold from this vault (%s). The vault can't hold more than you locked.", t, e.fmt(l.ExchSats))
+			if v.exchDeposit == 0 {
+				return userErr("You can only buy back %s sold from this vault (%s). Ask the exchange to lock buying capacity to buy more.", t, e.fmt(l.ExchSats))
+			}
+			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", e.fmt(l.ExchSats))
 		}
 	default:
 		return userErr("Unknown order side.")
@@ -682,13 +768,18 @@ func (e *UTXOEngine) claim() error {
 		return userErr("This vault is already closed.")
 	}
 	tx := v.userClaim()
-	if err := e.broadcast(tx, "Claim alone after the timelock",
-		fmt.Sprintf("Exit script: <%d> CHECKSEQUENCEVERIFY, then your signature only", v.delay), v.delayLeaf.Script,
+	if err := e.broadcast(tx, "Claim alone after the timelock: deposits paid back",
+		fmt.Sprintf("Exit script: <%d> CHECKSEQUENCEVERIFY, then both signatures, which the exchange gave when the vault opened", v.delay), v.delayLeaf.Script,
 		"You claimed the vault on your own", "Your solo claim was rejected"); err == nil {
 		v.closeTxid, v.closeKind = tx.TxHash().String(), "claimed"
-		if v.Latest().ExchSats > 0 {
+		l := v.Latest()
+		switch {
+		case l.ExchSats > v.exchDeposit:
 			e.log("warn", "The exchange missed its window, so you kept "+e.cfg.Info.Ticker+" you had sold",
-				"It never published your signed sale in time. This is why a real exchange must watch for exit requests around the clock.", "")
+				"It never published your signed sale in time, so each side got its deposit back. This is why a real exchange must watch for exit requests around the clock.", "")
+		case l.UserSats > v.userDeposit:
+			e.log("warn", "Nobody published your latest state, so the "+e.cfg.Info.Ticker+" you bought went back to the exchange",
+				"After the window only deposits are paid back. Your watchtower publishes your latest state during the window to prevent this.", "")
 		}
 	}
 	return nil
@@ -742,13 +833,18 @@ func (e *UTXOEngine) setPrice(usd int64) error {
 	return nil
 }
 
-// watchtower runs after every block and mode change: the exchange answers an
-// exit, then the user's watchtower checks for a revoked state, then the
-// exchange collects its share of a published state once D2 has passed.
+// watchtower runs after every block and mode change. In order: the exchange
+// answers an exit, the exchange's watchtower punishes a replaced state the
+// user published, the user's watchtower punishes a replaced state the
+// exchange published (or publishes the latest state when the pay-back of
+// deposits would cost the user coins they bought), and each side collects
+// its own delayed share once D2 has passed.
 func (e *UTXOEngine) watchtower() {
 	e.exchangeWatch()
+	e.exchangePenalty()
 	e.userWatch()
 	e.exchangeCollect()
+	e.userCollectOwn()
 }
 
 // exchangeWatch: the exchange reacts to a confirmed exit request.
@@ -763,7 +859,7 @@ func (e *UTXOEngine) exchangeWatch() {
 	pick := v.Latest()
 	if e.mode == "malicious" {
 		for _, s := range v.States {
-			if s.ExchSats > pick.ExchSats {
+			if v.current(s) && s.ExchSats > pick.ExchSats {
 				pick = s
 			}
 		}
@@ -777,7 +873,7 @@ func (e *UTXOEngine) exchangeWatch() {
 		"Exit script: your signature from order placement plus the exchange's", v.multisigLeaf.Script,
 		title, "Exchange's state publication rejected"); err == nil {
 		v.closeTxid, v.closeKind = tx.TxHash().String(), "published"
-		v.published = pick
+		v.published, v.publishedBy = pick, "exchange"
 		if pick.revealed {
 			e.log("warn", fmt.Sprintf("You hold revocation secret #%d for that state", pick.Index),
 				fmt.Sprintf("The node accepts the old state because you signed it, but the exchange's %s share is locked for %d blocks. With the secret, your watchtower can take it first.", e.fmt(pick.rAmt), v.penaltyDelay), "")
@@ -785,11 +881,90 @@ func (e *UTXOEngine) exchangeWatch() {
 	}
 }
 
-// userWatch: once a revoked state is confirmed on the chain, the user's
-// watchtower sweeps the exchange's share with the revocation secret.
+// userPublishOld is the "Publish an older state yourself" button: the user
+// tries the same trick, publishing their copy of whichever state paid them
+// most. The exchange's watchtower holds the user's secret for every replaced
+// state.
+func (e *UTXOEngine) userPublishOld() error {
+	v := e.vault
+	if v == nil || !v.exitSent {
+		return userErr("Request an exit first. A state can only be published from the exit output.")
+	}
+	if v.closeTxid != "" {
+		return userErr("This vault is already closed.")
+	}
+	pick := v.Latest()
+	for _, s := range v.States {
+		if v.current(s) && s.UserSats > pick.UserSats {
+			pick = s
+		}
+	}
+	if pick == v.Latest() {
+		return userErr("None of your older states pays you more than the latest one, so there's nothing to gain.")
+	}
+	tx := v.userPublish(pick)
+	if err := e.broadcast(tx, fmt.Sprintf("You publish old state #%d", pick.Index),
+		"Exit script: the exchange's signature from the fill plus yours", v.multisigLeaf.Script,
+		fmt.Sprintf("You published an OLD state (#%d, not #%d)", pick.Index, v.Latest().Index),
+		"Your state publication was rejected"); err == nil {
+		v.closeTxid, v.closeKind = tx.TxHash().String(), "published"
+		v.published, v.publishedBy = pick, "user"
+		e.log("warn", fmt.Sprintf("The exchange holds your revocation secret #%d", pick.Index),
+			fmt.Sprintf("The node accepts the old state because the exchange signed it, but your %s share is locked for %d blocks. With your secret, the exchange's watchtower can take it first.", e.fmt(pick.uAmt), v.penaltyDelay), "")
+	}
+	return nil
+}
+
+// exchangePenalty: once a replaced state the user published is confirmed,
+// the exchange's watchtower takes the user's share with the user's secret.
+func (e *UTXOEngine) exchangePenalty() {
+	v := e.vault
+	if v == nil || v.publishedBy != "user" || v.sweepTxid != "" || e.mode == "offline" {
+		return
+	}
+	s := v.published
+	if !s.revealed || s.uIndex < 0 || e.confs(v.closeTxid) == 0 {
+		return
+	}
+	if _, ok := e.unspent(s.userOut()); !ok {
+		return
+	}
+	tx := v.exchPenaltySweep(s, s.uSecret)
+	if err := e.broadcast(tx, fmt.Sprintf("Exchange's penalty sweep of state #%d", s.Index),
+		fmt.Sprintf("Revocation path: SHA256(your secret #%d) matches, plus the exchange's signature", s.Index), s.uRevLeaf.Script,
+		fmt.Sprintf("Penalty sweep: the exchange's watchtower took your %s share of old state #%d", e.fmt(s.uAmt), s.Index),
+		"Exchange's penalty sweep rejected"); err == nil {
+		v.sweepTxid, v.sweepKind = tx.TxHash().String(), "exchange-penalty"
+	}
+}
+
+// userWatch is the user's watchtower. If the exchange published a replaced
+// state, it sweeps the exchange's share with the revocation secret. If the
+// exit is confirmed, nobody has published, and the latest state pays the
+// user more than their deposit, it publishes the latest state, because the
+// pay-back after the window would only return deposits.
 func (e *UTXOEngine) userWatch() {
 	v := e.vault
-	if v == nil || v.published == nil || v.sweepTxid != "" || !e.userWT {
+	if v == nil || !e.userWT || !v.exitSent {
+		return
+	}
+	if v.closeTxid == "" {
+		l := v.Latest()
+		if l.UserSats <= v.userDeposit || e.confs(v.exitTx.TxHash().String()) == 0 {
+			return
+		}
+		e.log("info", "Your watchtower is publishing your latest state",
+			fmt.Sprintf("Without it, the pay-back after the window would only return deposits and you'd lose the %s you bought.", e.fmt(l.UserSats-v.userDeposit)), "")
+		tx := v.userPublish(l)
+		if err := e.broadcast(tx, fmt.Sprintf("You publish state #%d", l.Index),
+			"Exit script: the exchange's signature from the fill plus yours", v.multisigLeaf.Script,
+			fmt.Sprintf("Your watchtower published your latest state #%d", l.Index), "Your state publication was rejected"); err == nil {
+			v.closeTxid, v.closeKind = tx.TxHash().String(), "published"
+			v.published, v.publishedBy = l, "user"
+		}
+		return
+	}
+	if v.publishedBy != "exchange" || v.sweepTxid != "" {
 		return
 	}
 	s := v.published
@@ -810,11 +985,11 @@ func (e *UTXOEngine) userWatch() {
 	}
 }
 
-// exchangeCollect: the exchange takes its share of a published state after
-// D2 blocks, if nobody swept it with the revocation secret first.
+// exchangeCollect: the exchange takes its share of a state it published
+// after D2 blocks, if nobody swept it with the revocation secret first.
 func (e *UTXOEngine) exchangeCollect() {
 	v := e.vault
-	if v == nil || v.published == nil || v.sweepTxid != "" || e.mode == "offline" {
+	if v == nil || v.publishedBy != "exchange" || v.sweepTxid != "" || e.mode == "offline" {
 		return
 	}
 	s := v.published
@@ -833,6 +1008,33 @@ func (e *UTXOEngine) exchangeCollect() {
 		if s.revealed {
 			e.log("warn", "Nobody used your revocation secret in time",
 				"Your watchtower was off, so the exchange kept its share of the old state. This is why someone must watch the chain for you during an exit.", "")
+		}
+	}
+}
+
+// userCollectOwn: the user's wallet takes the user's share of a state the
+// user published, once D2 blocks have passed and nobody swept it.
+func (e *UTXOEngine) userCollectOwn() {
+	v := e.vault
+	if v == nil || v.publishedBy != "user" || v.sweepTxid != "" {
+		return
+	}
+	s := v.published
+	if s.uIndex < 0 || e.confs(v.closeTxid) < v.penaltyDelay {
+		return
+	}
+	if _, ok := e.unspent(s.userOut()); !ok {
+		return
+	}
+	tx := v.userCollect(s)
+	if err := e.broadcast(tx, fmt.Sprintf("You collect your share of state #%d", s.Index),
+		fmt.Sprintf("Your path: <%d> CHECKSEQUENCEVERIFY, then your signature", v.penaltyDelay), s.userLeaf.Script,
+		fmt.Sprintf("You collected your %s share of state #%d after %d blocks", e.fmt(s.uAmt), s.Index, v.penaltyDelay),
+		"Your claim was rejected"); err == nil {
+		v.sweepTxid, v.sweepKind = tx.TxHash().String(), "user"
+		if s.revealed {
+			e.log("warn", "The exchange didn't use your revocation secret in time",
+				"Its watchtower wasn't running, so the old state stood. The exchange has to watch the chain too.", "")
 		}
 	}
 }
@@ -867,7 +1069,7 @@ func (e *UTXOEngine) Snapshot() Snapshot {
 		}
 	}
 	e.userUtxos = keep
-	s.ExchSats = e.walletBalance(&e.exchUtxos)
+	s.ExchSats = e.walletBalance(&e.exchUtxos) - e.exchBase
 
 	for _, t := range e.txs {
 		if t.Status == "mempool" {
@@ -883,9 +1085,11 @@ func (e *UTXOEngine) Snapshot() Snapshot {
 			CloseTxid: v.closeTxid, CloseKind: v.closeKind, ClockTotal: v.delay,
 			Revocation: true, PenaltyDelay: v.penaltyDelay, PublishedState: -1,
 			SweepKind: v.sweepKind, SweepTxid: v.sweepTxid,
+			PublishedBy: v.publishedBy, UserDeposit: v.userDeposit, ExchDeposit: v.exchDeposit,
+			FundPending: v.gen > 0 && e.confs(v.fundTxid) == 0,
 			Scripts: []Labelled{
 				{"Both must sign (vault and exit output)", v.friendlyScript(v.multisigLeaf.Script)},
-				{fmt.Sprintf("You alone, %d blocks after the exit request", v.delay), v.friendlyScript(v.delayLeaf.Script)},
+				{fmt.Sprintf("Pay-back of deposits, %d blocks after the exit request (both signed it when the vault opened, so you can use it alone)", v.delay), v.friendlyScript(v.delayLeaf.Script)},
 			},
 		}
 		if v.published != nil {
@@ -894,7 +1098,9 @@ func (e *UTXOEngine) Snapshot() Snapshot {
 		if l := v.Latest(); l.R != nil {
 			vv.Scripts = append(vv.Scripts,
 				Labelled{fmt.Sprintf("Exchange's share of a published state: the exchange alone, %d blocks later", v.penaltyDelay), v.friendlyScript(l.exchLeaf.Script)},
-				Labelled{fmt.Sprintf("Exchange's share of state #%d: you, with revocation secret #%d (only once that state is replaced)", l.Index, l.Index), v.friendlyScript(l.revLeaf.Script)})
+				Labelled{fmt.Sprintf("Exchange's share of state #%d: you, with revocation secret #%d (only once that state is replaced)", l.Index, l.Index), v.friendlyScript(l.revLeaf.Script)},
+				Labelled{fmt.Sprintf("Your share of a state you publish: you alone, %d blocks later", v.penaltyDelay), v.friendlyScript(l.userLeaf.Script)},
+				Labelled{fmt.Sprintf("Your share of state #%d: the exchange, with your secret #%d (only once that state is replaced)", l.Index, l.Index), v.friendlyScript(l.uRevLeaf.Script)})
 		}
 		p := e.cfg.Params
 		if addr, err := btcutil.NewAddressTaproot(v.V.pkScript[2:], &p); err == nil {

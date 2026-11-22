@@ -30,8 +30,10 @@ Vault output   (Taproot, no key-path spend)
   └─ <your key> CHECKSIGVERIFY <exchange key> CHECKSIG            both must sign
 
 Exit output    (reached by an exit request both sides pre-sign when the vault opens)
-  ├─ <your key> CHECKSIGVERIFY <exchange key> CHECKSIG            exchange publishes a state you signed
-  └─ 144 CHECKSEQUENCEVERIFY DROP <your key> CHECKSIG             you alone, 144 blocks later
+  ├─ <your key> CHECKSIGVERIFY <exchange key> CHECKSIG            either side publishes a state both signed
+  └─ 144 CHECKSEQUENCEVERIFY DROP <your key> CHECKSIGVERIFY <exchange key> CHECKSIG
+                                                                  pay-back of deposits, pre-signed by both,
+                                                                  so you can use it alone 144 blocks later
 ```
 
 1. **Lock.** You move BTC into the 2-of-2 vault. You and the exchange both pre-sign an
@@ -41,12 +43,15 @@ Exit output    (reached by an exit request both sides pre-sign when the vault op
 3. **Settle.** When you're done, both sides sign and your share returns straight away.
 4. **Exit.** If the exchange won't cooperate, you broadcast the exit request. The exchange
    has 144 blocks to publish your latest signed split. After that, you can claim alone.
+   Claiming alone pays back what each side deposited (today, only you deposit, so you get
+   the whole vault).
 
 | What someone tries | What stops it |
 | --- | --- |
 | The exchange takes the coins | The vault script needs your signature |
 | The exchange vanishes | Exit request, then claim alone after 144 blocks |
 | You sell, the price rises, you try to exit with the coins | The exchange publishes the sale you already signed |
+| Either side publishes an older split | The other side holds that split's revocation secret and takes the cheater's share |
 
 ## What's in this repository
 
@@ -64,7 +69,7 @@ running the contract), not from the app's own logic.
 
 | Chain | Vault | Old-state attack |
 | --- | --- | --- |
-| Bitcoin | Taproot 2-of-2 script with a 144-block timelock | Revocation secrets: the user takes the exchange's share of an old state |
+| Bitcoin | Taproot 2-of-2 script with a 144-block timelock, plus exchange coins added by a splice so you can buy new BTC | Two-way revocation secrets: whoever publishes an old state loses their share of it |
 | Litecoin | The same Taproot scripts, 576-block timelock | Same revocation design as Bitcoin |
 | Ethereum | Smart contract where only a newer signed state can replace an older one, plus exchange-funded buying | **Closed** |
 | Solana | Program design following the Ethereum model | Design only |
@@ -105,10 +110,10 @@ a similar design on KuCoin in 2019 before shutting down in 2020; see
 
 This is a proof of concept, not a product.
 
-- **Bitcoin and Litecoin revocation depends on watching.** If the exchange publishes an
-  *older* state, your watchtower can take the exchange's share with that state's revocation
-  secret, but only within 6 blocks (Bitcoin) or 24 blocks (Litecoin). If nobody is watching,
-  the old state stands. The Ethereum version uses state numbers instead.
+- **Bitcoin and Litecoin revocation depends on watching.** If either side publishes an
+  *older* state, the other side's watchtower can take the cheater's share with that state's
+  revocation secret, but only within 6 blocks (Bitcoin) or 24 blocks (Litecoin). If nobody is
+  watching, the old state stands. The Ethereum version uses state numbers instead.
 - **Spot trading only.** There's no leverage, because losses must never exceed what's locked.
 - **Only the coins are self-custodied.** The shared cash balance sits with the exchange as normal.
 - **Flat fees**, no fee bumping, no real order book.
@@ -120,7 +125,7 @@ This is a proof of concept, not a product.
 - [x] Buy new coins with exchange-locked capacity (Ethereum)
 - [x] Revocation penalties on Bitcoin and Litecoin (test chains)
 - [x] One test account across all chains, and coin-to-coin swaps
-- [ ] Exchange-funded buying on Bitcoin and Litecoin
+- [x] Two-way revocation and exchange-funded buying on Bitcoin and Litecoin
 - [ ] Compile and test the Solana program
 - [ ] Deploy the Ethereum contract to EVM networks (Polygon, Arbitrum, Base)
 - [ ] Run on signet, Bitcoin's public test network

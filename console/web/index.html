@@ -359,10 +359,11 @@ function recipes(c) {
       ? ["A malicious exchange", `Sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit and mine twice. It submits your old state, then your watchtower replaces it with the newer one. Turn the watchtower off to see what happens without it.`]
       : ["A malicious exchange", `Sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit and mine twice. It publishes your older state, and your watchtower uses that state's revocation secret to take the exchange's share (a penalty sweep). Mine once more: you get the whole vault. Turn the watchtower off to see the exchange keep its share instead.`],
     ["Attempted theft", `With a vault open, press "Have the exchange try to steal". It's refused because your signature is missing.`],
+    ...(eth ? [] : [["Cheat as the user", `Sell 0.6, request an exit, and before mining press "Publish an older state yourself". It publishes the state from before your sale. Mine a block: the exchange's watchtower uses your revocation secret to take your share. Try it with the exchange offline to see the old state stand.`]]),
     ["Swap coins", eth
       ? `Open a vault on Bitcoin too. Here, lock 1 ETH, ask the exchange to lock 1 ETH, and mine a block. On the Bitcoin tab, swap 0.04 BTC into ETH: both vaults get a new state, and the account bar at the top shows the result.`
-      : `Lock 1 ${t} here. On Ethereum, lock 1 ETH, ask the exchange to lock 1 ETH and mine a block. Back here, swap 0.04 ${t} into ETH. ${t} you sold can also be bought back with a swap from another coin.`]
-  ].concat(c.dualFund ? [["Buy new " + t, `Lock 1 ${t} and mine a block. Ask the exchange to lock 1 ${t}, mine a block, add test cash, then buy 0.8 ${t}. Settle and mine: your wallet gets about 1.8 ${t}.`]] : []);
+      : `Lock 1 ${t} here. On Ethereum, lock 1 ETH, ask the exchange to lock 1 ETH and mine a block. Back here, swap 0.04 ${t} into ETH. Once the exchange has locked some ${t} here too, you can also swap other coins into new ${t}.`]
+  ].concat(c.dualFund ? [["Buy new " + t, `Lock 1 ${t} and mine a block. Ask the exchange to lock 1 ${t}, mine a block, add enough test cash, then buy 0.8 ${t}. Settle and mine: your wallet gets about 1.8 ${t}.`]] : []);
 }
 
 function toast(msg, isErr) {
@@ -522,11 +523,11 @@ function renderVault() {
   if (v.clockStarted) { const w = clockWords(v); head = w.head; sub = w.sub; foot = w.foot; }
   const closeNotes = {
     settled: "Settled with the exchange. Your share went back to your wallet.",
-    claimed: "You claimed the whole vault alone after the exit window.",
-    published: "The exchange closed the vault by publishing a state you had signed.",
+    claimed: c.id === "eth" ? "You claimed the whole vault alone after the exit window." : "You claimed alone after the exit window: each side got back what it deposited.",
+    published: v.publishedBy === "user" ? "You closed the vault by publishing a state the exchange had signed." : "The exchange closed the vault by publishing a state you had signed.",
     finalized: "The vault paid out after the window, using the newest submitted state."
   };
-  if (v.closeKind === "published") sub = "The exchange answered inside the window by publishing a signed state.";
+  if (v.closeKind === "published") sub = v.publishedBy === "user" ? "You published a signed state inside the window." : "The exchange answered inside the window by publishing a signed state.";
   if (v.closeKind === "claimed") sub = "You claimed the coins alone after the clock ran out.";
   const ticks = Array.from({length: cells}, (_, i) => `<i class="${i < filled ? "on" : ""}"></i>`).join("");
   const closed = v.status === "closed" || v.status === "closing";
@@ -543,11 +544,13 @@ function renderVault() {
     <td class="r">${coin(s.userSats, 4)}</td><td class="r">${coin(s.exchSats, 4)}</td>${revCell(s)}</tr>`).join("");
   const held = rev ? v.states.filter(s => s.secret) : [];
   const revNote = !rev ? "" : `<p class="hint" style="margin:8px 0 0">${held.length
-    ? `Revocation secrets you hold: <b>${held.map(s => "#" + s.index).join(", ")}</b>. Those states are replaced. If the exchange publishes one of them, your watchtower uses its secret to take the exchange's share (a penalty sweep). For the latest state you only have the hash.`
+    ? `Revocation secrets you hold: <b>${held.map(s => "#" + s.index).join(", ")}</b>. Those states are replaced. If the exchange publishes one of them, your watchtower uses its secret to take the exchange's share (a penalty sweep). The exchange holds your secrets for the same states, so the same goes for you. For the latest state you only have the hash.`
     : "Revocation secrets you hold: none yet. Each time a newer state is signed, the exchange hands you the secret of the one it replaces."}</p>`;
   let sweepNote = "";
   if (v.sweepKind === "penalty") sweepNote = `The exchange published old state #${v.publishedState}, so your watchtower used revocation secret #${v.publishedState} to take the exchange's share (penalty sweep). You get the whole vault, less fees.`;
   if (v.sweepKind === "exchange") sweepNote = `The exchange collected its share of state #${v.publishedState} after its ${v.penaltyDelay}-block wait.`;
+  if (v.sweepKind === "exchange-penalty") sweepNote = `You published old state #${v.publishedState}, so the exchange's watchtower used your revocation secret #${v.publishedState} to take your share (penalty sweep). The exchange gets the whole vault.`;
+  if (v.sweepKind === "user") sweepNote = `You collected your share of state #${v.publishedState} after the ${v.penaltyDelay}-block wait.`;
   const scripts = (v.scripts || []).map(x => `<p class="small muted" style="margin:10px 0 4px">${esc(x.label)}</p><pre class="mono">${esc(x.text)}</pre>`).join("");
 
   el.innerHTML = `
@@ -581,6 +584,7 @@ function renderVault() {
       <button class="btn primary" id="settle" ${v.status === "open" ? "" : "disabled"}>Settle with the exchange</button>
       <button class="btn amber" id="exit" ${v.status === "open" ? "" : "disabled"}>Request exit</button>
       <button class="btn" id="claim" ${canClaim ? "" : "disabled"}>${esc(c.claimLabel)}</button>
+      ${rev ? `<button class="btn danger" id="cheat" ${canClaim ? "" : "disabled"} title="Publish your copy of an older state that paid you more">Publish an older state yourself</button>` : ""}
     </div>
     <p class="hint">${v.status === "funding" ? "Mine a block to confirm your deposit before trading." :
       v.status === "open" ? "Settling is instant when the exchange cooperates. Request an exit if it won't." : ""}</p>
@@ -596,20 +600,25 @@ function renderVault() {
   $("settle").onclick = () => act({action: "settle"});
   $("exit").onclick = () => act({action: "exit", by: "user"});
   $("claim").onclick = () => act({action: "claim"});
+  if ($("cheat")) $("cheat").onclick = () => act({action: "cheat"});
 }
 
 function capacityBlock(v, c) {
   if (!c.dualFund) return "";
-  if (v.exchDeposit > 0) {
-    return `<p class="hint" style="margin-top:10px">You put in <b>${coin(v.userDeposit)}</b> and the exchange locked <b>${coin(v.exchDeposit)}</b> of buying capacity. You can buy up to <b>${coin(v.exchSats)}</b> more.</p>`;
-  }
+  const eth = c.id === "eth";
   if (v.fundPending) {
     return `<p class="hint" style="margin-top:10px">The exchange's deposit is waiting for a block. Mine one to add the buying capacity.</p>`;
   }
-  if (v.status !== "open") return "";
-  return `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:#fff">
-      <label for="capAmt" style="color:var(--ink);font-weight:600">Buy more than you sell</label>
-      <p class="hint" style="margin:0 0 8px">Ask the exchange to lock its own ${esc(c.ticker)} in your vault so you can buy from it. Fee: 0.2% of the amount, taken from your share.</p>
+  const info = v.exchDeposit > 0
+    ? `<p class="hint" style="margin-top:10px">You put in <b>${coin(v.userDeposit)}</b> and the exchange locked <b>${coin(v.exchDeposit)}</b> of buying capacity. You can buy up to <b>${coin(v.exchSats)}</b> more.</p>` : "";
+  // Ethereum's contract takes one deposit per vault; Bitcoin and Litecoin can add more with another splice.
+  if (v.status !== "open" || (eth && v.exchDeposit > 0)) return info;
+  const how = eth
+    ? `Ask the exchange to lock its own ${esc(c.ticker)} in your vault so you can buy from it.`
+    : `Ask the exchange to add its own ${esc(c.ticker)} to your vault so you can buy from it. You both sign one transaction that moves the vault and the exchange's coins into a bigger vault.`;
+  return info + `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:#fff">
+      <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 ? "Add more buying capacity" : "Buy more than you sell"}</label>
+      <p class="hint" style="margin:0 0 8px">${how} Fee: 0.2% of the amount, taken from your share.</p>
       <div class="field"><input id="capAmt" type="number" min="0.001" step="0.5" value="1" inputmode="decimal" aria-label="Buying capacity in ${esc(c.ticker)}">
       <button class="btn" id="capBtn">Ask the exchange to lock ${esc(c.ticker)}</button></div>
     </div>`;
@@ -715,7 +724,7 @@ function render() {
   $("wt").checked = !!S.watchtower;
   $("wtHint").textContent = c.id === "eth"
     ? "It watches exits for you and submits your newest signed state if an older one shows up."
-    : "It watches the chain during an exit. If the exchange publishes a state you hold the revocation secret for, it uses the secret to take the exchange's share.";
+    : "It watches the chain during an exit. If the exchange publishes a state you hold the revocation secret for, it uses the secret to take the exchange's share. If your latest state pays you more than you put in, it publishes that state for you.";
   const amt = parseFloat($("orderAmt").value) || 0;
   $("orderEst").textContent = amt > 0 ? (side === "sell" ? `You'd receive about ${usd(amt * S.price)}.` : `That would cost about ${usd(amt * S.price)}.`) : "";
   $("order").textContent = side === "sell" ? "Sign and sell" : (c.dualFund ? "Sign and buy" : "Sign and buy back");

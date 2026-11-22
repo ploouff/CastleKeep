@@ -17,7 +17,7 @@ node, or the Ethereum smart contract) decides whether each one is accepted or re
 
 | Chain | How the vault is built | Exit window | Old-state attack |
 | --- | --- | --- | --- |
-| **Bitcoin** | Taproot 2-of-2 script, pre-signed exit request, `CHECKSEQUENCEVERIFY` timelock | 144 blocks (about 24 hours) | **Penalty:** the exchange's share of each state is locked for 6 blocks. Once a state is replaced you hold its revocation secret, so your watchtower can take that share if the old state is published |
+| **Bitcoin** | Taproot 2-of-2 script, pre-signed exit request, `CHECKSEQUENCEVERIFY` timelock | 144 blocks (about 24 hours) | **Penalty, both ways:** whoever publishes a state gets their own share locked for 6 blocks. Once a state is replaced, each side holds the other's revocation secret for it, so publishing an old state lets the other side take the cheater's share |
 | **Litecoin** | The same Taproot scripts as Bitcoin | 576 blocks (blocks are 2.5 minutes, so also about 24 hours) | Same as Bitcoin, with a 24-block lock on the exchange's share |
 | **Ethereum** | `CastleVault` smart contract (`contract/CastleVault.sol`). Both sides sign every state. The exchange can lock its own ETH so you can buy from it. | 24 hours on the chain's clock | **Closed:** during an exit only a state with a higher number can replace an older one, and your watchtower submits the newest |
 
@@ -39,17 +39,27 @@ So you never give up one coin without already holding the other. It is not one b
 transaction (the chains can't see each other), and it is not a hash-locked "atomic swap".
 Each vault is protected by its own chain's rules, exactly as for a normal trade.
 
-What you can swap into follows the buying rules below: ETH once the exchange has locked
-buying capacity, BTC or LTC only to buy back what you sold from that vault.
+What you can swap into follows the buying rules below: any coin you sold from that vault,
+plus whatever buying capacity the exchange has locked there.
 
-### Buying new coins (Ethereum)
+### Buying new coins (all chains)
 
-On Bitcoin and Litecoin you can only buy back what you sold, because the vault only holds
-your coins. On Ethereum you can ask the exchange to **lock its own ETH in your vault**
-("buying capacity"), for a 0.2% fee taken from your share. You can then buy up to that
-amount with your cash on the exchange. If an exit happens and nobody submits a state, each
-side simply gets its own deposit back; your watchtower submits your latest state so ETH you
-bought still counts.
+Without help you can only buy back what you sold, because the vault only holds your coins.
+On every chain you can ask the exchange to **lock its own coins in your vault** ("buying
+capacity"), for a 0.2% fee taken from your share. You can then buy up to that amount with
+your cash, or with a swap from another coin, and the coins you buy are in the vault from
+the start.
+
+- **Ethereum:** the exchange sends ETH to the contract (`fund`), once per vault.
+- **Bitcoin and Litecoin:** you and the exchange both sign one transaction (a "splice")
+  that spends the vault plus some of the exchange's coins into a bigger vault with the same
+  scripts. The exit request and the pay-back are signed again, so the old ones (and every
+  older state) stop working. The exchange can add more later with another splice. Its test
+  wallet starts with 20 coins.
+
+If an exit happens and nobody publishes a state, each side simply gets back what it put
+in. Your watchtower publishes your latest state during the exit window, so the coins you
+bought still count. With the watchtower off, they go back to the exchange.
 
 ## Set up (Windows, Command Prompt)
 
@@ -122,7 +132,7 @@ starts fresh.
 | **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on Ethereum they mine one block or skip the clock ahead an hour or a day. |
 | **Your wallet** | Test coins only you control. Get more from the faucet, or lock some into a vault. On Ethereum, gas fees come out of this. |
 | **Vault** | The latest signed split, the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. |
-| **Exchange** | Set the price, sell or buy back, swap into another coin, choose how the exchange behaves, and (Ethereum) switch your watchtower on or off. |
+| **Exchange** | Set the price, sell or buy, swap into another coin, choose how the exchange behaves, and switch your watchtower on or off. |
 | **Activity and Transaction inspector** | Everything that happened, and the exact rule that accepted or refused each transaction. |
 
 ## Things to try
@@ -162,10 +172,13 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 
 ## Known limits
 
+- **Claim alone on Bitcoin and Litecoin pays back deposits.** Without buying capacity only
+  you deposit, so you get the whole vault. With it, the exchange gets its deposit back too,
+  and your watchtower publishes your latest state if it pays you more.
 - **Revocation on Bitcoin and Litecoin only works if someone is watching.** Your watchtower
   must sweep an old state within 6 blocks (BTC) or 24 blocks (LTC). Ethereum uses state numbers.
-- **On Bitcoin and Litecoin you can only buy back what you sold.** Exchange-funded buying
-  isn't built there yet.
+- **On Ethereum the exchange can lock buying capacity once per vault.** The contract allows
+  one deposit; Bitcoin and Litecoin allow more with further splices.
 - **The cash side is custodial**, as on any exchange. One cash balance is shared by all coins.
 - **Swaps are two signed states, not one transaction.** They are only as safe as the two
   vaults they touch, and there is no hash-locked atomic swap.
