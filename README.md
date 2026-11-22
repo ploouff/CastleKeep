@@ -1,7 +1,6 @@
-[README.md](https://github.com/user-attachments/files/35209137/README.md)
 # Castlekeep
 
-**Trade bitcoin on an exchange without the exchange ever holding your coins.**
+**Trade crypto on an exchange without the exchange ever holding your coins.** Working on Bitcoin, Litecoin and Ethereum test chains, with a Solana design.
 
 Castlekeep is a prototype for self-custodial exchange settlement. Instead of depositing
 BTC into an exchange's wallet, you lock it into a Bitcoin vault that needs **both your key
@@ -9,7 +8,7 @@ and the exchange's key** to move. You trade against that locked balance as norma
 exchange disappears or turns hostile, you can always get your coins back on your own after
 a 144-block (about 24-hour) window.
 
-![Castlekeep console](console/preview.png)
+![Castlekeep console](console/preview-eth.png)
 
 > **Test network only.** Everything here runs on a private Bitcoin test chain with
 > worthless test coins. The code has not been audited. Never use it with real bitcoin.
@@ -53,15 +52,27 @@ Exit output    (reached by an exit request both sides pre-sign when the vault op
 
 | Folder | What it is |
 | --- | --- |
-| [`console/`](console/) | A clickable web app. Lock, trade, settle, exit, mine blocks and switch the exchange between honest, offline and malicious, all in your browser. **Start here.** |
-| [`prototype/`](prototype/) | A command-line version that runs four scenarios automatically and checks every result. |
+| [`console/`](console/) | A clickable web app for **Bitcoin, Litecoin and Ethereum**. Lock, trade, settle, exit, move the chain forward and switch the exchange between honest, offline and malicious. **Start here.** |
+| [`console/contract/`](console/contract/) | `CastleVault.sol`, the Ethereum smart contract. |
+| [`prototype/`](prototype/) | The original Bitcoin command-line version that runs four scenarios and checks every result. |
+| [`solana/`](solana/) | A Solana design and draft program (not yet compiled or tested), plus notes on other coins. |
 
-Both start their own Bitcoin node (btcd) in regtest mode, so every accept or reject comes
-from real Bitcoin consensus rules.
+Every accept or reject comes from a real test node (btcd, ltcd, or an Ethereum dev node
+running the contract), not from the app's own logic.
+
+## Chains
+
+| Chain | Vault | Old-state attack |
+| --- | --- | --- |
+| Bitcoin | Taproot 2-of-2 script with a 144-block timelock | Revocation secrets: the user takes the exchange's share of an old state |
+| Litecoin | The same Taproot scripts, 576-block timelock | Same revocation design as Bitcoin |
+| Ethereum | Smart contract where only a newer signed state can replace an older one, plus exchange-funded buying | **Closed** |
+| Solana | Program design following the Ethereum model | Design only |
 
 ## Quick start
 
-You need [Go](https://go.dev/dl/) 1.21 or newer.
+You need [Go](https://go.dev/dl/) 1.21 or newer, plus a test node for each chain you
+want (see [`console/README.md`](console/README.md)). For Bitcoin:
 
 ```
 go install github.com/btcsuite/btcd@v0.24.2
@@ -77,20 +88,33 @@ go run .
 
 Your browser opens the console. See [`console/README.md`](console/README.md) for a full guide.
 
+## Prior art
+
+Castlekeep is a modern take on Arwen-style non-custodial exchange settlement. Arwen ran
+a similar design on KuCoin in 2019 before shutting down in 2020; see
+[the Arwen paper](https://eprint.iacr.org/2020/024).
+
 ## Status and known limits
 
 This is a proof of concept, not a product.
 
-- **No revocation yet.** The exchange holds every state you've signed, so a malicious
-  exchange can publish an *older* one. Version 2 will add Lightning-style revocation keys
-  so that publishing an outdated state forfeits the whole vault.
+- **Bitcoin and Litecoin revocation depends on watching.** If the exchange publishes an
+  *older* state, your watchtower can take the exchange's share with that state's revocation
+  secret, but only within 6 blocks (Bitcoin) or 24 blocks (Litecoin). If nobody is watching,
+  the old state stands. The Ethereum version uses state numbers instead.
 - **Spot trading only.** There's no leverage, because losses must never exceed what's locked.
 - **Only the BTC side is self-custodied.** Cash from sales sits with the exchange as normal.
 - **Flat fees**, no fee bumping, no real order book.
 
 ## Roadmap
 
-- [ ] Revocation penalties for outdated states
+- [x] Litecoin and Ethereum support
+- [x] Old-state protection on Ethereum
+- [x] Buy new coins with exchange-locked capacity (Ethereum)
+- [x] Revocation penalties on Bitcoin and Litecoin (test chains)
+- [ ] Exchange-funded buying on Bitcoin and Litecoin
+- [ ] Compile and test the Solana program
+- [ ] Deploy the Ethereum contract to EVM networks (Polygon, Arbitrum, Base)
 - [ ] Run on signet, Bitcoin's public test network
 - [ ] MuSig2 key-path settlements (cheaper and more private)
 - [ ] Real fee estimation and fee bumping

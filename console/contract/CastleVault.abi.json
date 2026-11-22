@@ -1,0 +1,478 @@
+[
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "address",
+    "name": "by",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "deadline",
+    "type": "uint64"
+   }
+  ],
+  "name": "ExitRequested",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "userAmount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "exchangeAmount",
+    "type": "uint256"
+   }
+  ],
+  "name": "Finalized",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "exchangeAmount",
+    "type": "uint256"
+   }
+  ],
+  "name": "Funded",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "address",
+    "name": "user",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "address",
+    "name": "exchange",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "exitDelay",
+    "type": "uint64"
+   }
+  ],
+  "name": "Opened",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "userAmount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "exchangeAmount",
+    "type": "uint256"
+   }
+  ],
+  "name": "Settled",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "address",
+    "name": "by",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "userAmount",
+    "type": "uint256"
+   }
+  ],
+  "name": "StateSubmitted",
+  "type": "event"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "name": "finalize",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "name": "fund",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "nextId",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "exchange",
+    "type": "address"
+   },
+   {
+    "internalType": "uint64",
+    "name": "exitDelay",
+    "type": "uint64"
+   }
+  ],
+  "name": "open",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "name": "requestExit",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint64",
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint256",
+    "name": "userAmount",
+    "type": "uint256"
+   },
+   {
+    "components": [
+     {
+      "internalType": "uint8",
+      "name": "v",
+      "type": "uint8"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "r",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "s",
+      "type": "bytes32"
+     }
+    ],
+    "internalType": "struct CastleVault.Sig",
+    "name": "us",
+    "type": "tuple"
+   },
+   {
+    "components": [
+     {
+      "internalType": "uint8",
+      "name": "v",
+      "type": "uint8"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "r",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "s",
+      "type": "bytes32"
+     }
+    ],
+    "internalType": "struct CastleVault.Sig",
+    "name": "es",
+    "type": "tuple"
+   }
+  ],
+  "name": "settle",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint64",
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint256",
+    "name": "userAmount",
+    "type": "uint256"
+   }
+  ],
+  "name": "stateHash",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint64",
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint256",
+    "name": "userAmount",
+    "type": "uint256"
+   },
+   {
+    "components": [
+     {
+      "internalType": "uint8",
+      "name": "v",
+      "type": "uint8"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "r",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "s",
+      "type": "bytes32"
+     }
+    ],
+    "internalType": "struct CastleVault.Sig",
+    "name": "us",
+    "type": "tuple"
+   },
+   {
+    "components": [
+     {
+      "internalType": "uint8",
+      "name": "v",
+      "type": "uint8"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "r",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "s",
+      "type": "bytes32"
+     }
+    ],
+    "internalType": "struct CastleVault.Sig",
+    "name": "es",
+    "type": "tuple"
+   }
+  ],
+  "name": "submitState",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "name": "vaults",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "user",
+    "type": "address"
+   },
+   {
+    "internalType": "address",
+    "name": "exchange",
+    "type": "address"
+   },
+   {
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "userDeposit",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "exchangeDeposit",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint64",
+    "name": "exitDelay",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "exitStart",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "bestNonce",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint256",
+    "name": "bestUser",
+    "type": "uint256"
+   },
+   {
+    "internalType": "bool",
+    "name": "hasBest",
+    "type": "bool"
+   },
+   {
+    "internalType": "bool",
+    "name": "closed",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ }
+]
