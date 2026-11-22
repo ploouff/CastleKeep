@@ -78,9 +78,12 @@ func main() {
 		NewUTXOEngine(ltcConfig(*ltcdPath)),
 		NewEthEngine(ethConfig(*anvilPath, *ethRPC)),
 	}
+	// One test account: every chain shares its cash balance.
+	acct := NewAccount()
 	byID := map[string]Engine{}
 	for _, e := range engines {
 		byID[e.Info().ID] = e
+		e.UseAccount(acct)
 		e.Start()
 	}
 	stopAll := func() {
@@ -124,6 +127,9 @@ func main() {
 		}
 		writeJSON(w, e.Snapshot())
 	})
+	mux.HandleFunc("/api/account", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, accountView(acct, engines))
+	})
 	mux.HandleFunc("/api/action", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -137,7 +143,13 @@ func main() {
 			return
 		}
 		resp := map[string]any{}
-		if err := e.Do(req); err != nil {
+		var err error
+		if req.Action == "swap" {
+			err = swap(acct, e, byID[req.To], req.Sats)
+		} else {
+			err = e.Do(req)
+		}
+		if err != nil {
 			if errors.Is(err, errUser) {
 				resp["error"] = err.Error()
 			} else {

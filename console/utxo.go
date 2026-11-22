@@ -89,7 +89,7 @@ func NewUTXOEngine(cfg UTXOConfig) *UTXOEngine {
 		exchWallet:  ew,
 		userPk:      walletScript(uw),
 		exchPk:      walletScript(ew),
-		tradeBook:   tradeBook{price: cfg.DefaultPrice, mode: "honest"},
+		tradeBook:   tradeBook{acct: NewAccount(), price: cfg.DefaultPrice, mode: "honest"},
 		userWT:      true,
 		txs:         map[string]*TxInfo{},
 		outLabels:   map[wire.OutPoint]IO{},
@@ -342,10 +342,13 @@ func (e *UTXOEngine) walletBalance(list *[]utxo) (total int64) {
 func (e *UTXOEngine) Do(r ActionReq) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.ready {
-		return userErr("The %s test chain is still starting up.", e.cfg.Info.Name)
+	if err := e.tradeReady(); err != nil {
+		return err
 	}
 	switch r.Action {
+	case "cash":
+		e.addTestCash(e.log)
+		return nil
 	case "faucet":
 		return e.faucet()
 	case "mine":
@@ -541,58 +544,85 @@ func (e *UTXOEngine) blocksLeft() int64 {
 	return left
 }
 
-func (e *UTXOEngine) order(side string, sats int64) error {
+func (e *UTXOEngine) lockTrade()   { e.mu.Lock() }
+func (e *UTXOEngine) unlockTrade() { e.mu.Unlock() }
+
+func (e *UTXOEngine) tradeReady() error {
+	if !e.ready {
+		return userErr("The %s test chain is still starting up.", e.cfg.Info.Name)
+	}
+	return nil
+}
+
+// canTrade checks that an order of this size can go into the vault now. It
+// doesn't look at cash: orders pay with cash, swaps pay with another coin.
+func (e *UTXOEngine) canTrade(side string, sats int64) error {
 	v := e.vault
 	t := e.cfg.Info.Ticker
 	switch st := e.vaultStatus(); st {
 	case "open":
 	case "funding":
-		return userErr("Your deposit hasn't confirmed yet. Mine a block first.")
+		return userErr("Your %s deposit hasn't confirmed yet. Mine a block first.", t)
 	case "none", "closed", "closing":
 		return userErr("Lock %s into a vault before trading.", t)
 	default:
-		return userErr("Trading is frozen while an exit request is in progress.")
+		return userErr("%s trading is frozen while an exit request is in progress.", t)
 	}
 	if e.mode == "offline" {
-		return userErr("The exchange is offline and isn't accepting orders.")
+		return userErr("The exchange is offline and isn't accepting %s orders.", t)
 	}
 	if sats <= 0 {
 		return userErr("Enter an amount above zero.")
 	}
 	l := v.Latest()
-	cost := orderCost(sats, e.price)
-	var user, exch int64
-	var label string
 	switch side {
 	case "sell":
 		if sats > l.UserSats {
 			return userErr("You only have %s in the vault to sell.", e.fmt(l.UserSats))
 		}
-		user, exch = l.UserSats-sats, l.ExchSats+sats
-		label = fmt.Sprintf("Sold %s at %s", e.fmt(sats), fmtUSD(e.price*100))
 	case "buy":
 		if sats > l.ExchSats {
 			return userErr("You can only buy back %s sold from this vault (%s). The vault can't hold more than you locked.", t, e.fmt(l.ExchSats))
 		}
-		if cost > e.cashCents {
-			return userErr("That costs %s and you have %s in cash.", fmtUSD(cost), fmtUSD(e.cashCents))
-		}
-		user, exch = l.UserSats+sats, l.ExchSats-sats
-		label = fmt.Sprintf("Bought %s at %s", e.fmt(sats), fmtUSD(e.price*100))
 	default:
 		return userErr("Unknown order side.")
+	}
+	return nil
+}
+
+// recordTrade signs the new state for an order canTrade accepted.
+func (e *UTXOEngine) recordTrade(side string, sats int64, label string) {
+	v := e.vault
+	l := v.Latest()
+	user, exch := l.UserSats-sats, l.ExchSats+sats
+	if side == "buy" {
+		user, exch = l.UserSats+sats, l.ExchSats-sats
 	}
 	s := v.signState(label, user, exch, e.height())
 	e.log("sign", fmt.Sprintf("You signed state #%d before sending the order", s.Index),
 		fmt.Sprintf("Yours: %s, owed to buyers: %s. The exchange now holds your signature, so this trade can't be undone. It sent you the hash of revocation secret #%d.", e.fmt(user), e.fmt(exch), s.Index), "")
 	e.log("sign", fmt.Sprintf("The exchange handed you revocation secret #%d", s.Index-1),
 		fmt.Sprintf("State #%d is now revoked. If the exchange ever publishes it, your watchtower can use this secret to take the exchange's share of it.", s.Index-1), "")
-	if side == "sell" {
-		e.cashCents += cost
-	} else {
-		e.cashCents -= cost
+}
+
+func (e *UTXOEngine) order(side string, sats int64) error {
+	if err := e.canTrade(side, sats); err != nil {
+		return err
 	}
-	e.log("ok", label, fmt.Sprintf("Filled instantly on the order book. Cash balance: %s.", fmtUSD(e.cashCents)), "")
+	cost := orderCost(sats, e.price)
+	var cash int64
+	label := fmt.Sprintf("Sold %s at %s", e.fmt(sats), fmtUSD(e.price*100))
+	if side == "buy" {
+		var err error
+		if cash, err = e.acct.spend(cost); err != nil {
+			return err
+		}
+		label = fmt.Sprintf("Bought %s at %s", e.fmt(sats), fmtUSD(e.price*100))
+	} else {
+		cash = e.acct.add(cost)
+	}
+	e.recordTrade(side, sats, label)
+	e.log("ok", label, fmt.Sprintf("Filled instantly on the order book. Cash balance: %s.", fmtUSD(cash)), "")
 	return nil
 }
 
@@ -814,7 +844,7 @@ func (e *UTXOEngine) Snapshot() Snapshot {
 	defer e.mu.Unlock()
 	s := Snapshot{Chain: e.cfg.Info, Available: e.available, Unavailable: e.unavailable,
 		Ready: e.ready, Progress: e.progress, InitErr: e.initErr,
-		Price: e.price, Mode: e.mode, CashCents: e.cashCents, Events: e.events,
+		Price: e.price, Mode: e.mode, CashCents: e.acct.Cash(), Events: e.events,
 		Watchtower: e.userWT, HasUserWT: true}
 	if !e.ready {
 		return s

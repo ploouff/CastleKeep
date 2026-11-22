@@ -28,6 +28,8 @@ import (
 var (
 	engMu    sync.Mutex
 	engines_ = map[string]Engine{}
+	// testAcct is the one account every chain shares, as in the console.
+	testAcct = NewAccount()
 )
 
 func TestMain(m *testing.M) {
@@ -77,6 +79,7 @@ func engine(t *testing.T, chain string) Engine {
 		if s := e.Snapshot(); !s.Available {
 			t.Skipf("%s not available: %s", chain, s.Unavailable)
 		}
+		e.UseAccount(testAcct)
 		e.Start()
 		engines_[chain] = e
 	}
@@ -116,12 +119,14 @@ func (h *harness) fresh() {
 	switch e := h.e.(type) {
 	case *UTXOEngine:
 		e.mu.Lock()
-		e.vault, e.mode, e.price, e.cashCents, e.userWT = nil, "honest", e.cfg.DefaultPrice, 0, true
+		e.vault, e.mode, e.price, e.userWT = nil, "honest", e.cfg.DefaultPrice, true
+		e.acct.set(0)
 		e.events = nil
 		e.mu.Unlock()
 	case *EthEngine:
 		e.mu.Lock()
-		e.vault, e.mode, e.price, e.cashCents, e.userWT = nil, "honest", e.cfg.DefaultPrice, 0, true
+		e.vault, e.mode, e.price, e.userWT = nil, "honest", e.cfg.DefaultPrice, true
+		e.acct.set(0)
 		e.events = nil
 		e.mu.Unlock()
 	}

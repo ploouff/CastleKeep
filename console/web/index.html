@@ -186,6 +186,17 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 .switch input{width:18px;height:18px;accent-color:var(--pine)}
 .best{font-size:13.5px;margin-top:8px}
 @media (max-width:680px){.tabs{padding:0 12px}.model{margin:12px 16px 0}}
+/* one account across every chain */
+.acct{display:flex;flex-wrap:wrap;align-items:stretch;padding:0 28px;background:var(--panel);border-bottom:1px solid var(--rule)}
+.acct .cell{padding:10px 18px 10px 0;margin-right:18px;border-right:1px solid var(--rule-soft);min-width:150px}
+.acct .cell:last-of-type{border-right:0}
+.acct .k{font-size:12.5px;color:var(--steel)}
+.acct .v{font:600 18px/1.25 var(--display)}
+.acct .d{font-size:12.5px;color:var(--steel)}
+.acct .total .v{color:var(--pine)}
+.acct .go{align-self:center;margin-left:auto}
+select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px;padding:7px 8px;background:#fff}
+@media (max-width:680px){.acct{padding:0 12px}.acct .cell{min-width:130px}}
 </style>
 </head>
 <body>
@@ -199,6 +210,7 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
     <div class="mine" role="group" aria-label="Move the chain forward" id="mineBtns"></div>
   </div>
 </header>
+<section class="acct" id="acct" aria-label="Your test account across every coin"></section>
 <nav class="tabs" role="tablist" aria-label="Choose a blockchain" id="tabs"></nav>
 <p class="model" id="model"></p>
 
@@ -259,6 +271,17 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
     <button class="btn primary block" id="order" style="margin-top:10px">Sign and sell</button>
     <p class="hint" id="orderHint"></p>
     <hr class="divider">
+    <label for="swapTo">Swap into another coin</label>
+    <p class="hint" style="margin:0 0 8px">One order: sell <span id="swapFrom"></span> from this vault and buy another coin with the money, at the prices shown. No cash is used.</p>
+    <div class="field">
+      <input id="swapAmt" type="number" min="0" step="0.01" value="0.04" inputmode="decimal" aria-label="Amount to swap">
+      <span class="muted" style="align-self:center" id="swapUnit"></span>
+      <select id="swapTo" aria-label="Coin to buy"></select>
+    </div>
+    <p class="hint" id="swapEst"></p>
+    <button class="btn primary block" id="swap" style="margin-top:10px">Sign and swap</button>
+    <p class="hint" id="swapHint">The exchange signs the new state for the coin you buy first. Only then do you sign the sale, so you never give up one coin without already holding the other.</p>
+    <hr class="divider">
     <label>How the exchange behaves</label>
     <div class="seg" role="group" aria-label="Exchange behaviour" id="modes">
       <button data-mode="honest">Honest</button>
@@ -295,7 +318,7 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 
 <script>
 const $ = id => document.getElementById(id);
-let chains = [], cur = null, S = null, side = "sell", selectedTx = null, busy = false, lastChain = null;
+let chains = [], cur = null, S = null, A = null, side = "sell", selectedTx = null, busy = false, lastChain = null;
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const T = () => (S && S.chain.ticker) || "";
@@ -305,6 +328,11 @@ const coin = (u, dp = 8) => {
   return s + " " + T();
 };
 const usd = n => "$" + Math.round(n).toLocaleString("en-US");
+const coinOf = (u, t, dp = 8) => {
+  let s = (u / 1e8).toFixed(dp);
+  if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  return s + " " + t;
+};
 const shortId = t => t && t.length > 20 ? t.slice(0, 10) + "…" + t.slice(-6) : (t || "");
 const dur = mins => {
   if (mins < 1) return `${Math.max(1, Math.round(mins * 60))} seconds`;
@@ -330,7 +358,10 @@ function recipes(c) {
     eth
       ? ["A malicious exchange", `Sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit and mine twice. It submits your old state, then your watchtower replaces it with the newer one. Turn the watchtower off to see what happens without it.`]
       : ["A malicious exchange", `Sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit and mine twice. It publishes your older state, and your watchtower uses that state's revocation secret to take the exchange's share (a penalty sweep). Mine once more: you get the whole vault. Turn the watchtower off to see the exchange keep its share instead.`],
-    ["Attempted theft", `With a vault open, press "Have the exchange try to steal". It's refused because your signature is missing.`]
+    ["Attempted theft", `With a vault open, press "Have the exchange try to steal". It's refused because your signature is missing.`],
+    ["Swap coins", eth
+      ? `Open a vault on Bitcoin too. Here, lock 1 ETH, ask the exchange to lock 1 ETH, and mine a block. On the Bitcoin tab, swap 0.04 BTC into ETH: both vaults get a new state, and the account bar at the top shows the result.`
+      : `Lock 1 ${t} here. On Ethereum, lock 1 ETH, ask the exchange to lock 1 ETH and mine a block. Back here, swap 0.04 ${t} into ETH. ${t} you sold can also be bought back with a swap from another coin.`]
   ].concat(c.dualFund ? [["Buy new " + t, `Lock 1 ${t} and mine a block. Ask the exchange to lock 1 ${t}, mine a block, add test cash, then buy 0.8 ${t}. Settle and mine: your wallet gets about 1.8 ${t}.`]] : []);
 }
 
@@ -350,6 +381,7 @@ async function act(body) {
     const j = await r.json();
     if (j.error) toast(j.error, true);
     if (j.state && j.state.chain.id === cur) S = j.state;
+    await loadAccount();
   } catch (e) {
     toast("Lost contact with the console. Is the program still running?", true);
   } finally {
@@ -380,6 +412,47 @@ async function poll() {
     } catch (e) {}
   }
   setTimeout(poll, S && S.ready ? 2500 : 800);
+}
+
+async function loadAccount() {
+  try { A = await (await fetch("/api/account")).json(); } catch (e) {}
+  renderAccount();
+}
+async function pollAccount() {
+  if (!busy) await loadAccount();
+  setTimeout(pollAccount, 2500);
+}
+
+// The account bar: every coin, the shared cash and the total, on every tab.
+function renderAccount() {
+  if (!A) return;
+  const cells = A.holdings.map(h => {
+    if (!h.ready) return `<div class="cell"><div class="k">${esc(h.name)}</div><div class="v muted">–</div><div class="d">starting or not installed</div></div>`;
+    const total = h.walletSats + h.vaultSats;
+    return `<div class="cell"><div class="k">${esc(h.name)} at ${usd(h.price)}</div><div class="v">${esc(coinOf(total, h.ticker, 4))}</div>
+      <div class="d">wallet ${esc(coinOf(h.walletSats, "", 4))}· vault ${esc(coinOf(h.vaultSats, "", 4))}· ${usd(h.valueCents / 100)}</div></div>`;
+  }).join("");
+  $("acct").innerHTML = cells +
+    `<div class="cell"><div class="k">Cash on the exchange</div><div class="v">${usd(A.cashCents / 100)}</div><div class="d">shared by every coin</div></div>
+     <div class="cell total"><div class="k">Total (test dollars)</div><div class="v">${usd(A.totalCents / 100)}</div><div class="d">coins at today's prices, plus cash</div></div>
+     <button class="btn go" id="acctCash">Add $10,000 test cash</button>`;
+  $("acctCash").onclick = () => act({action: "cash"});
+  if (S && S.ready && !busy) renderSwap();
+}
+
+function renderSwap() {
+  const c = S.chain;
+  const others = (A ? A.holdings : []).filter(h => h.chain !== c.id && h.ready);
+  const sel = $("swapTo"), keep = sel.value;
+  const opts = others.map(h => `<option value="${h.chain}">into ${esc(h.ticker)}</option>`).join("");
+  if (sel.dataset.opts !== opts) { sel.innerHTML = opts; sel.dataset.opts = opts; if (others.some(h => h.chain === keep)) sel.value = keep; }
+  const to = others.find(h => h.chain === sel.value);
+  const amt = parseFloat($("swapAmt").value) || 0;
+  $("swapEst").textContent = to && amt > 0
+    ? `You'd get about ${coinOf(Math.floor(amt * S.price / to.price * 1e8), to.ticker, 6)} (${usd(amt * S.price)}).`
+    : (others.length ? "" : "Start another chain to swap into it.");
+  const v = S.vault;
+  $("swap").disabled = busy || !to || !(v && v.status === "open");
 }
 
 function renderTabs() {
@@ -589,6 +662,7 @@ function renderStatic() {
   $("lock").textContent = `Lock ${c.ticker}`;
   $("lockAmt").value = c.defaultLock; $("orderAmt").value = c.defaultOrder;
   $("orderUnit").textContent = c.ticker;
+  $("swapUnit").textContent = c.ticker; $("swapFrom").textContent = c.ticker;
   $("priceLabel").textContent = `${c.ticker} price (USD)`;
   const step = S.price >= 10000 ? 1000 : S.price >= 1000 ? 100 : 10;
   $("priceSteps").innerHTML = `<button class="btn" style="flex:1" data-ps="-${step}">−$${step.toLocaleString("en-US")}</button><button class="btn" style="flex:1" data-ps="${step}">+$${step.toLocaleString("en-US")}</button>`;
@@ -596,9 +670,7 @@ function renderStatic() {
   $("orderHint").textContent = c.id === "eth"
     ? "You sign the new vault state with the order and the exchange signs it on the fill. A newer state always beats an older one."
     : "You sign the new vault state before the order is sent, so a filled trade can't be undone.";
-  $("cashHint").textContent = c.testCash
-    ? `Your dollars on the exchange, for buying ${c.ticker} and receiving sale proceeds. The exchange holds this like any normal account; only the ${c.ticker} side is self-custodied.`
-    : `Proceeds from sales. The exchange holds this like any normal account; only the ${c.ticker} side is self-custodied.`;
+  $("cashHint").textContent = `One cash balance for your whole account: money from selling one coin can be spent on another. The exchange holds this cash like any normal account; only the coins are self-custodied.`;
   $("addCash").hidden = !c.testCash;
   document.querySelector('[data-side="buy"]').textContent = c.dualFund ? "Buy" : "Buy back";
   $("model").innerHTML = `<b>${esc(c.name)}:</b> ${esc(c.model)}`;
@@ -656,6 +728,7 @@ function render() {
   const v = S.vault;
   $("lockHint").textContent = v && !v.closeTxid ? "Close your current vault first: settle it, or exit and claim."
     : "Opens a vault that needs your key and the exchange's to move.";
+  renderSwap();
   renderVault(); renderLog(); renderTxs();
 }
 
@@ -672,6 +745,9 @@ $("addCash").onclick = () => act({action: "cash"});
 $("lock").onclick = () => act({action: "lock", sats: Math.round((parseFloat($("lockAmt").value) || 0) * 1e8)});
 $("order").onclick = () => act({action: "order", side, sats: Math.round((parseFloat($("orderAmt").value) || 0) * 1e8)});
 $("orderAmt").oninput = render;
+$("swap").onclick = () => act({action: "swap", to: $("swapTo").value, sats: Math.round((parseFloat($("swapAmt").value) || 0) * 1e8)});
+$("swapAmt").oninput = () => { if (S && S.ready) renderSwap(); };
+$("swapTo").onchange = () => { if (S && S.ready) renderSwap(); };
 $("steal").onclick = () => act({action: "steal"});
 $("wt").onchange = e => act({action: "watchtower", on: e.target.checked});
 document.querySelectorAll("[data-side]").forEach(b => b.onclick = () => {
@@ -686,7 +762,7 @@ document.addEventListener("click", e => {
   selectedTx = t.dataset.tx; renderTxs();
   if (t.classList.contains("link")) document.querySelector(".insp").scrollIntoView({behavior: "smooth", block: "start"});
 });
-pollChains().then(poll);
+pollChains().then(poll); pollAccount();
 
 </script>
 </body>

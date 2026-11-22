@@ -13,12 +13,14 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | --- | --- |
 | `console/` | Go web app (module `castlekeep-console`) for Bitcoin, Litecoin and Ethereum. Main work happens here. |
 | `console/engine.go` | Shared types (`Engine`, `ActionReq`, `Snapshot`, `VaultView`, event log). Amounts are always in 1e-8 coin units ("sats"; on ETH 1 unit = 1e10 wei). |
+| `console/account.go` | `Account` (one cash balance shared by every engine via `UseAccount`), `accountView` for `/api/account`, and `swap`. |
 | `console/utxo.go` | `UTXOEngine`: runs btcd/ltcd in regtest, handles actions, the exchange's and user's watchtowers, snapshots. |
 | `console/utxo_vault.go` | Taproot scripts and transaction building for the BTC/LTC vault, states and revocation outputs. |
 | `console/eth.go` | `EthEngine`: JSON-RPC to Hardhat/Anvil, deploys `contract/CastleVault.bin`, signs states. |
 | `console/contract/` | `CastleVault.sol` plus compiled `.bin`/`.abi.json` (the `.bin` is embedded with `go:embed`). |
-| `console/web/index.html` | Single-page UI (embedded). Talks to `/api/chains`, `/api/state?chain=`, `/api/action`. |
+| `console/web/index.html` | Single-page UI (embedded). Talks to `/api/chains`, `/api/state?chain=`, `/api/account`, `/api/action`. |
 | `console/scenario_test.go` | Scenario tests that drive each engine through `Do(ActionReq)`. |
+| `console/swap_test.go` | Swap and shared-account tests (need all three chains). |
 | `prototype/` | Original Bitcoin CLI demo (separate Go module). |
 | `solana/` | Untested Anchor design. Not compiled. |
 
@@ -52,6 +54,13 @@ exchange can `fund` "buying capacity" (fee 0.2% from the user's share). The user
 watchtower submits the latest state when an older one shows up, or when the user bought
 more than they deposited.
 
+**One account, swaps (`account.go`)**: all engines share one `*Account` for cash (tests use
+`testAcct`). `/api/action` with `action: "swap"`, `chain` = coin sold, `to` = coin bought,
+`sats` = amount sold, calls `swap()`. It locks both engines (sorted by chain ID), checks
+both legs with `canTrade`, then calls `recordTrade` on the buying leg first and the selling
+leg second. Orders use the same `canTrade`/`recordTrade` plus cash. A swap is two vault
+states, not one transaction and not an atomic swap.
+
 The UTXO engine and the ETH engine each run both parties' logic in-process: "watchtower"
 functions react after each `mine` action, and the exchange `mode` is honest / offline /
 malicious.
@@ -77,6 +86,7 @@ malicious.
   cd console
   go test -v -timeout 30m
   ```
+  The swap tests (`TestSwap`) need btcd, ltcd and the Ethereum node together.
   Set `CASTLEKEEP_ETH_RPC` to use another Ethereum node URL. Don't run the console and the
   tests against the same Hardhat node at the same time: both mine blocks and move its clock.
 

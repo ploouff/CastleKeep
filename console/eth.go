@@ -107,7 +107,7 @@ func NewEthEngine(cfg EthConfig) *EthEngine {
 	e := &EthEngine{
 		cfg: cfg, progress: "Starting the Ethereum node…",
 		userKey: uk, exchKey: ek, userAddr: ethAddress(uk), exchAddr: ethAddress(ek),
-		tradeBook: tradeBook{price: cfg.DefaultPrice, mode: "honest"},
+		tradeBook: tradeBook{acct: NewAccount(), price: cfg.DefaultPrice, mode: "honest"},
 		userWT:    true,
 		txs:       map[string]*TxInfo{},
 	}
@@ -565,8 +565,8 @@ ecrecover(state, exchangeSig) == exchange  // else "missing a valid exchange sig
 func (e *EthEngine) Do(r ActionReq) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.ready {
-		return userErr("The Ethereum test chain is still starting up.")
+	if err := e.tradeReady(); err != nil {
+		return err
 	}
 	switch r.Action {
 	case "faucet":
@@ -586,8 +586,7 @@ func (e *EthEngine) Do(r ActionReq) error {
 	case "capacity":
 		return e.addCapacity(r.Sats)
 	case "cash":
-		e.cashCents += 1_000_000
-		e.log("info", "Added $10,000 of test cash on the exchange", "Use it to buy ETH. Like any exchange balance, the exchange holds this cash.", "")
+		e.addTestCash(e.log)
 		return nil
 	case "steal":
 		return e.steal()
@@ -744,34 +743,41 @@ func (e *EthEngine) lock(sats int64) error {
 	return nil
 }
 
-func (e *EthEngine) order(side string, sats int64) error {
+func (e *EthEngine) lockTrade()   { e.mu.Lock() }
+func (e *EthEngine) unlockTrade() { e.mu.Unlock() }
+
+func (e *EthEngine) tradeReady() error {
+	if !e.ready {
+		return userErr("The Ethereum test chain is still starting up.")
+	}
+	return nil
+}
+
+// canTrade checks that an order of this size can go into the vault now. It
+// doesn't look at cash: orders pay with cash, swaps pay with another coin.
+func (e *EthEngine) canTrade(side string, sats int64) error {
 	v := e.vault
 	switch st := e.vaultStatus(); st {
 	case "open":
 	case "funding":
-		return userErr("Your deposit hasn't confirmed yet. Mine a block first.")
+		return userErr("Your ETH deposit hasn't confirmed yet. Mine a block first.")
 	case "none", "closed", "closing":
 		return userErr("Lock ETH into a vault before trading.")
 	default:
-		return userErr("Trading is frozen while an exit is in progress.")
+		return userErr("ETH trading is frozen while an exit is in progress.")
 	}
 	if e.mode == "offline" {
-		return userErr("The exchange is offline and isn't accepting orders.")
+		return userErr("The exchange is offline and isn't accepting ETH orders.")
 	}
 	if sats <= 0 {
 		return userErr("Enter an amount above zero.")
 	}
 	l := v.latest()
-	cost := orderCost(sats, e.price)
-	var user, exch int64
-	var label string
 	switch side {
 	case "sell":
 		if sats > l.UserSats {
 			return userErr("You only have %s in the vault to sell.", e.fmt(l.UserSats))
 		}
-		user, exch = l.UserSats-sats, l.ExchSats+sats
-		label = fmt.Sprintf("Sold %s at %s", e.fmt(sats), fmtUSD(e.price*100))
 	case "buy":
 		if sats > l.ExchSats {
 			if v.exchDeposit == 0 {
@@ -779,23 +785,42 @@ func (e *EthEngine) order(side string, sats int64) error {
 			}
 			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", e.fmt(l.ExchSats))
 		}
-		if cost > e.cashCents {
-			return userErr("That costs %s and you have %s in cash.", fmtUSD(cost), fmtUSD(e.cashCents))
-		}
-		user, exch = l.UserSats+sats, l.ExchSats-sats
-		label = fmt.Sprintf("Bought %s at %s", e.fmt(sats), fmtUSD(e.price*100))
 	default:
 		return userErr("Unknown order side.")
+	}
+	return nil
+}
+
+// recordTrade signs the new state for an order canTrade accepted.
+func (e *EthEngine) recordTrade(side string, sats int64, label string) {
+	l := e.vault.latest()
+	user, exch := l.UserSats-sats, l.ExchSats+sats
+	if side == "buy" {
+		user, exch = l.UserSats+sats, l.ExchSats-sats
 	}
 	s := e.newState(label, user, exch)
 	e.log("sign", fmt.Sprintf("You signed state #%d with the order; the exchange signed it on the fill", s.Index),
 		fmt.Sprintf("Yours: %s, owed to buyers: %s. State #%d now replaces every earlier state.", e.fmt(user), e.fmt(exch), s.Index), "")
-	if side == "sell" {
-		e.cashCents += cost
-	} else {
-		e.cashCents -= cost
+}
+
+func (e *EthEngine) order(side string, sats int64) error {
+	if err := e.canTrade(side, sats); err != nil {
+		return err
 	}
-	e.log("ok", label, fmt.Sprintf("Filled instantly on the order book. Cash balance: %s.", fmtUSD(e.cashCents)), "")
+	cost := orderCost(sats, e.price)
+	var cash int64
+	label := fmt.Sprintf("Sold %s at %s", e.fmt(sats), fmtUSD(e.price*100))
+	if side == "buy" {
+		var err error
+		if cash, err = e.acct.spend(cost); err != nil {
+			return err
+		}
+		label = fmt.Sprintf("Bought %s at %s", e.fmt(sats), fmtUSD(e.price*100))
+	} else {
+		cash = e.acct.add(cost)
+	}
+	e.recordTrade(side, sats, label)
+	e.log("ok", label, fmt.Sprintf("Filled instantly on the order book. Cash balance: %s.", fmtUSD(cash)), "")
 	return nil
 }
 
@@ -997,7 +1022,7 @@ func (e *EthEngine) Snapshot() Snapshot {
 	defer e.mu.Unlock()
 	s := Snapshot{Chain: e.cfg.Info, Available: e.available, Unavailable: e.unavailable,
 		Ready: e.ready, Progress: e.progress, InitErr: e.initErr, Price: e.price, Mode: e.mode,
-		CashCents: e.cashCents, Events: e.events, Watchtower: e.userWT, HasUserWT: true}
+		CashCents: e.acct.Cash(), Events: e.events, Watchtower: e.userWT, HasUserWT: true}
 	if !e.ready {
 		return s
 	}

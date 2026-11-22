@@ -46,6 +46,7 @@ type ActionReq struct {
 	Side   string `json:"side"`
 	By     string `json:"by"`
 	On     bool   `json:"on"`
+	To     string `json:"to"` // swap: the chain whose coin you buy
 }
 
 type Event struct {
@@ -151,6 +152,7 @@ type Engine interface {
 	Stop()
 	Snapshot() Snapshot
 	Do(req ActionReq) error
+	UseAccount(acct *Account)
 }
 
 // ------------------------------------------------------------------ shared helpers
@@ -200,11 +202,24 @@ func (l *eventLog) add(height int64, kind, title, detail, txid string) {
 	}
 }
 
-// signedState is the trading record both engine types keep.
+// tradeBook is the trading state both engine types keep. The cash balance
+// lives in the Account, which every chain shares.
 type tradeBook struct {
-	cashCents int64
-	price     int64
-	mode      string
+	acct  *Account
+	price int64
+	mode  string
+}
+
+// UseAccount makes the engine share acct's cash balance with other chains.
+func (t *tradeBook) UseAccount(acct *Account) { t.acct = acct }
+
+func (t *tradeBook) tradePrice() int64 { return t.price }
+
+// addTestCash is the "Add $10,000 test cash" button, on every chain.
+func (t *tradeBook) addTestCash(log func(kind, title, detail, txid string)) {
+	bal := t.acct.add(testCashCents)
+	log("info", "Added $10,000 of test cash on the exchange",
+		fmt.Sprintf("Your account's cash is now %s, shared by every coin. Like any exchange balance, the exchange holds this cash.", fmtUSD(bal)), "")
 }
 
 func orderCost(sats, price int64) int64 { return sats * price * 100 / unit } // cents

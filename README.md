@@ -69,6 +69,13 @@ running the contract), not from the app's own logic.
 | Ethereum | Smart contract where only a newer signed state can replace an older one, plus exchange-funded buying | **Closed** |
 | Solana | Program design following the Ethereum model | Design only |
 
+All chains share **one test account**: a bar at the top of the console shows your BTC, LTC
+and ETH (wallet plus vault share), one cash balance and the total value. You can also
+**swap** one coin for another in a single order: the exchange signs the new state for the
+coin you buy first, then you sign the sale. It is two vault states on two chains, not one
+transaction (and not a hash-locked "atomic swap"), so each side is protected by its own
+chain's rules as usual.
+
 ## Quick start
 
 You need [Go](https://go.dev/dl/) 1.21 or newer, plus a test node for each chain you
@@ -103,7 +110,7 @@ This is a proof of concept, not a product.
   secret, but only within 6 blocks (Bitcoin) or 24 blocks (Litecoin). If nobody is watching,
   the old state stands. The Ethereum version uses state numbers instead.
 - **Spot trading only.** There's no leverage, because losses must never exceed what's locked.
-- **Only the BTC side is self-custodied.** Cash from sales sits with the exchange as normal.
+- **Only the coins are self-custodied.** The shared cash balance sits with the exchange as normal.
 - **Flat fees**, no fee bumping, no real order book.
 
 ## Roadmap
@@ -112,6 +119,7 @@ This is a proof of concept, not a product.
 - [x] Old-state protection on Ethereum
 - [x] Buy new coins with exchange-locked capacity (Ethereum)
 - [x] Revocation penalties on Bitcoin and Litecoin (test chains)
+- [x] One test account across all chains, and coin-to-coin swaps
 - [ ] Exchange-funded buying on Bitcoin and Litecoin
 - [ ] Compile and test the Solana program
 - [ ] Deploy the Ethereum contract to EVM networks (Polygon, Arbitrum, Base)
