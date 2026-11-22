@@ -6,6 +6,9 @@ pragma solidity ^0.8.24;
 /// both the user and the exchange sign, or through an exit window.
 ///
 /// Every trade produces a new state: (nonce, userAmount). Both parties sign it.
+/// Settling (closing at once, with no exit window) needs a second, separate
+/// signature from both on a "settle" message, made only at settlement time, so
+/// signatures on old trade states can never be used to settle.
 /// During an exit window anyone may submit a signed state, but only one with a
 /// HIGHER nonce than any submitted before. That makes old states worthless:
 /// the latest state always wins if someone submits it in time. (On Bitcoin
@@ -74,23 +77,29 @@ contract CastleVault {
         return keccak256(abi.encodePacked("castlekeep-state", block.chainid, address(this), id, nonce, userAmount));
     }
 
-    function _check(Vault storage v, uint256 id, uint64 nonce, uint256 userAmount, Sig calldata us, Sig calldata es)
+    /// The message both parties sign to settle. It is separate from stateHash, so a
+    /// signature on an old trade state can't be used to close the vault early.
+    function settleHash(uint256 id, uint64 nonce, uint256 userAmount) public view returns (bytes32) {
+        return keccak256(abi.encodePacked("castlekeep-settle", block.chainid, address(this), id, nonce, userAmount));
+    }
+
+    function _check(Vault storage v, bytes32 message, uint256 userAmount, Sig calldata us, Sig calldata es)
         internal
         view
     {
         require(userAmount <= v.amount, "split is larger than the vault");
-        bytes32 h = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", stateHash(id, nonce, userAmount)));
+        bytes32 h = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", message));
         require(ecrecover(h, us.v, us.r, us.s) == v.user, "missing a valid user signature");
         require(ecrecover(h, es.v, es.r, es.s) == v.exchange, "missing a valid exchange signature");
     }
 
-    /// Cooperative close: both signed this split, pay it out now.
+    /// Cooperative close: both signed the settle message for this split, pay it out now.
     function settle(uint256 id, uint64 nonce, uint256 userAmount, Sig calldata us, Sig calldata es) external {
         Vault storage v = vaults[id];
         require(v.user != address(0), "no such vault");
         require(!v.closed, "vault is closed");
         require(v.exitStart == 0, "an exit is in progress; submit a state instead");
-        _check(v, id, nonce, userAmount, us, es);
+        _check(v, settleHash(id, nonce, userAmount), userAmount, us, es);
         emit Settled(id, nonce, userAmount, v.amount - userAmount);
         _payout(v, id, userAmount);
     }
@@ -112,7 +121,7 @@ contract CastleVault {
         require(v.exitStart != 0, "no exit has been requested");
         require(block.timestamp < uint256(v.exitStart) + v.exitDelay, "the exit window has ended");
         require(!v.hasBest || nonce > v.bestNonce, "a newer state was already submitted");
-        _check(v, id, nonce, userAmount, us, es);
+        _check(v, stateHash(id, nonce, userAmount), userAmount, us, es);
         v.bestNonce = nonce;
         v.bestUser = userAmount;
         v.hasBest = true;

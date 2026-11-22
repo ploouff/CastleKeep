@@ -372,6 +372,7 @@ func TestEthereum(t *testing.T) {
 	t.Run("TheftRefused", func(t *testing.T) { ethTheft(newHarness(t, "eth")) })
 	t.Run("BuyingCapacity", func(t *testing.T) { ethCapacity(newHarness(t, "eth")) })
 	t.Run("WatchtowerKeepsBoughtETH", func(t *testing.T) { ethCapacityExit(newHarness(t, "eth")) })
+	t.Run("OldStateCantSettle", func(t *testing.T) { ethOldStateCantSettle(newHarness(t, "eth")) })
 }
 
 func ethLock(h *harness) {
@@ -858,4 +859,25 @@ func utxoMaliciousAfterCapacity(h *harness) {
 	h.mine(1)
 	// Both coins come back, less lock, exit, payout and sweep fees.
 	h.approx("wallet change", h.wallet()-w0, oneCoin-4*txFee, 1500)
+}
+
+// ethOldStateCantSettle: signatures on an old trade state can't be used to
+// settle (close at once). Settling needs both sides to sign a separate settle
+// message for the latest state.
+func ethOldStateCantSettle(h *harness) {
+	w0 := h.wallet()
+	ethLock(h)
+	h.order("sell", 60_000_000)
+	e := h.e.(*EthEngine)
+	e.mu.Lock()
+	s0 := e.vault.states[0] // you owned everything before the sale
+	e.send(e.userAddr, nil, e.stateCall("settle", s0, s0.userSig), &TxInfo{Label: "Settle with old state #0"},
+		"Settled with an old state", "Settling with an old state was refused")
+	e.mu.Unlock()
+	h.expectRejected("settling with old trade signatures", "user signature")
+	h.do(ActionReq{Action: "settle"})
+	h.expectAccepted("settling the latest state")
+	h.mine(1)
+	h.expectStatus("closed")
+	h.ethWithin("wallet change", h.wallet()-w0, -60_000_000)
 }

@@ -65,6 +65,20 @@ func openBrowser(url string) {
 }
 
 func main() {
+	// The separate programs: go run . chains | exchange | wallet
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "chains":
+			runChains(os.Args[2:])
+			return
+		case "exchange":
+			runExchange(os.Args[2:])
+			return
+		case "wallet":
+			runWallet(os.Args[2:])
+			return
+		}
+	}
 	btcdPath := flag.String("btcd", goBin("btcd"), "path to btcd (Bitcoin)")
 	ltcdPath := flag.String("ltcd", goBin("ltcd"), "path to ltcd (Litecoin)")
 	anvilPath := flag.String("anvil", findAnvil(), "path to anvil (Ethereum)")
@@ -100,6 +114,44 @@ func main() {
 		os.Exit(0)
 	}()
 
+	mux := consoleMux(engines, func() AccountView { return accountView(acct, engines) },
+		func(from, to Engine, sats int64) error { return swap(acct, from, to, sats) })
+
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	if err != nil {
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			panic(err)
+		}
+	}
+	url := fmt.Sprintf("http://%s", ln.Addr().String())
+	fmt.Println("Castlekeep console (test networks only)")
+	for _, e := range engines {
+		s := e.Snapshot()
+		status := "starting"
+		if !s.Available {
+			status = "not installed: " + s.Unavailable
+		}
+		fmt.Printf("  %-9s %s\n", e.Info().Name, status)
+	}
+	fmt.Println("Open:", url)
+	fmt.Println("Press Ctrl+C here to stop.")
+	if !*noBrowser {
+		openBrowser(url)
+	}
+	if err := http.Serve(ln, mux); err != nil {
+		stopAll()
+		panic(err)
+	}
+}
+
+// consoleMux serves the page and its API for a set of chain engines. The
+// one-program console and the separate wallet program both use it.
+func consoleMux(engines []Engine, account func() AccountView, swapFn func(from, to Engine, sats int64) error) *http.ServeMux {
+	byID := map[string]Engine{}
+	for _, e := range engines {
+		byID[e.Info().ID] = e
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		b, _ := webFS.ReadFile("web/index.html")
@@ -128,7 +180,7 @@ func main() {
 		writeJSON(w, e.Snapshot())
 	})
 	mux.HandleFunc("/api/account", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, accountView(acct, engines))
+		writeJSON(w, account())
 	})
 	mux.HandleFunc("/api/action", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -145,7 +197,7 @@ func main() {
 		resp := map[string]any{}
 		var err error
 		if req.Action == "swap" {
-			err = swap(acct, e, byID[req.To], req.Sats)
+			err = swapFn(e, byID[req.To], req.Sats)
 		} else {
 			err = e.Do(req)
 		}
@@ -159,33 +211,7 @@ func main() {
 		resp["state"] = e.Snapshot()
 		writeJSON(w, resp)
 	})
-
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
-	if err != nil {
-		ln, err = net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			panic(err)
-		}
-	}
-	url := fmt.Sprintf("http://%s", ln.Addr().String())
-	fmt.Println("Castlekeep console (test networks only)")
-	for _, e := range engines {
-		s := e.Snapshot()
-		status := "starting"
-		if !s.Available {
-			status = "not installed: " + s.Unavailable
-		}
-		fmt.Printf("  %-9s %s\n", e.Info().Name, status)
-	}
-	fmt.Println("Open:", url)
-	fmt.Println("Press Ctrl+C here to stop.")
-	if !*noBrowser {
-		openBrowser(url)
-	}
-	if err := http.Serve(ln, mux); err != nil {
-		stopAll()
-		panic(err)
-	}
+	return mux
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

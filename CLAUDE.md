@@ -21,6 +21,13 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | `console/web/index.html` | Single-page UI (embedded). Talks to `/api/chains`, `/api/state?chain=`, `/api/account`, `/api/action`. |
 | `console/scenario_test.go` | Scenario tests that drive each engine through `Do(ActionReq)`. |
 | `console/swap_test.go` | Swap and shared-account tests (need all three chains). |
+| `console/split_core.go`, `split_net.go` | Two-party BTC/LTC vault built from public keys only, chain access, and the messages between the separate programs. |
+| `console/split_exchange.go` | Exchange server (`Exchange`, HTTP `/v1/...`): exchange keys, wallet, prices, cash, its own watchtower (`Tick`). |
+| `console/split_wallet.go` | Wallet client (`Wallet`): user keys and secrets, checks every exchange signature and amount, its own watchtower (`Tick`). |
+| `console/split_test.go` | Tests running the exchange as a real HTTP server against the wallet on the same test node. |
+| `console/split_apps.go` | The `chains`, `exchange`, `wallet` subcommands; `walletEngine` adapts the wallet to the page's `Engine` API. |
+| `console/split_eth.go`, `split_apps_eth.go`, `split_eth_test.go` | Ethereum in the separate programs, and its tests. |
+| `console/split_swap.go`, `split_swap_test.go` | Swaps across the three chains in the separate programs. |
 | `prototype/` | Original Bitcoin CLI demo (separate Go module). |
 | `solana/` | Untested Anchor design. Not compiled. |
 
@@ -61,8 +68,27 @@ U_n  ├─ <D2> CSV DROP <user> CHECKSIG                 user claims after D2
   coins (`exchangeStock`); the snapshot reports the change from that.
 - Cooperative settlement spends V directly with both signatures (no revocation needed).
 
+**Separate programs (work in progress)**: `split_*.go`. Message order: opening
+gets the exchange's signatures on exit, pay-back and state #0 before the deposit is sent;
+an order gets the exchange's signature on the user's copy first, then the user signs and
+reveals u_{n-1}, then the exchange reveals r_{n-1}; a splice only swaps the old state's
+secrets after it confirms (`/v1/capacity/finish`). Run as `go run . chains` (nodes, faucet,
+mine on :9100), `go run . exchange` (:9200, admin page `web/exchange.html`) and
+`go run . wallet` (:9300, the usual page via `walletEngine` in `split_apps.go`). ETH is in `split_eth.go` (exchange proposes a
+split, wallet signs, exchange signs; settle signature only for the latest state, after
+which the exchange stops trading on that vault; same rule on BTC/LTC). Swaps: `split_swap.go` (`/v1/swap` prepares
+both sides, signs the buying side first and takes its price from cash; the wallet checks
+prices and both splits, completes the buying side, then the selling side, which credits
+the sale). No steal demo there.
+
 **Ethereum (`eth.go`, `CastleVault.sol`)**: both sides sign every state (nonce = state
-index). During the 24 h exit window `submitState` only accepts a higher nonce; `finalize`
+index). Settling (`settle`) needs both signatures on a separate `settleHash`
+message, signed only at settlement time for the latest state, so old trade signatures
+can't close the vault early. After changing the `.sol`, recompile with the solc that
+came with Hardhat (no download needed), from the `console` folder:
+`node contract\compile.js %USERPROFILE%\castlekeep-eth\node_modules\solc contract`
+(solc 0.8.26, optimizer 200 runs, evm cancun; writes `CastleVault.bin` and `.abi.json`).
+During the 24 h exit window `submitState` only accepts a higher nonce; `finalize`
 pays the best submitted state, or refunds each side's deposit if none was submitted. The
 exchange can `fund` "buying capacity" (fee 0.2% from the user's share). The user's
 watchtower submits the latest state when an older one shows up, or when the user bought

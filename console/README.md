@@ -123,6 +123,47 @@ starts fresh.
 | `-port 9000` | Use a different port if 8080 is taken |
 | `-no-browser` | Don't open the browser automatically |
 
+## Separate exchange and wallet programs (preview)
+
+The console above runs both sides in one program. You can also run the exchange and your
+wallet as **separate programs** that never share private keys: they only send each other
+signatures over the network, and each reads the chain itself. Open three Command Prompt
+windows in the `console` folder and start, in this order:
+
+1. `go run . chains` starts the Bitcoin and Litecoin test nodes and uses your Hardhat node
+   for Ethereum (start Hardhat first, or Ethereum is left out). Wait until it has mined its
+   first blocks and deployed the contract (about a minute).
+2. `go run . exchange` is the exchange server. It holds only the exchange's keys, its wallet
+   (20 test coins per chain), prices and cash. Its admin page opens at
+   `http://127.0.0.1:9200`, where you set prices and switch it between honest, offline and
+   malicious, and see every vault as the exchange sees it.
+3. `go run . wallet` is your wallet. It holds only your keys and revocation secrets and
+   opens the usual page at `http://127.0.0.1:9300`.
+
+Your wallet checks every signature and amount the exchange sends before signing anything:
+
+- When you lock coins, the deposit is only sent after the exchange has signed the exit
+  request, the pay-back and the opening state.
+- For each trade, the exchange signs your copy of the new state first. You then sign
+  its copy and hand over your secret for the old state, and the exchange hands over its own.
+- When the exchange adds coins (a splice), the secrets for the state before it are only
+  swapped once the splice has confirmed.
+- On Ethereum, the exchange proposes each new split, your wallet checks and signs it, and
+  then the exchange signs. Settling needs a separate settle signature from both, only for
+  the latest state.
+- Once the exchange has signed a settlement, it stops trading on that vault, so an old
+  settlement can't be used after later trades.
+
+Swaps work across all three coins in the separate programs too. The exchange prepares both
+sides at once and signs the side you buy first; your wallet checks both splits and the
+prices before signing anything, completes the buying side, then signs the selling side.
+The price of what you buy comes out of your cash as soon as the exchange signs it (your
+balance can dip below zero for that moment), and the money from the sale goes back in once
+your wallet signs the selling side, so a completed swap leaves your cash unchanged.
+
+Not in the separate programs: the "Have the exchange try to steal" demo (the exchange's keys aren't in your wallet to try it with). Ctrl+C in the chains window
+stops the test nodes.
+
 ## The screen
 
 | Area | What it does |
@@ -169,6 +210,11 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `eth.go` | Ethereum engine: JSON-RPC, Keccak, signatures and contract calls |
 | `contract/CastleVault.sol` | The Ethereum smart contract (`.bin` is the compiled bytecode) |
 | `web/index.html` | The interface |
+| `split_core.go`, `split_net.go` | Separate programs: the vault built from public keys only, and the messages between them |
+| `split_exchange.go`, `split_wallet.go` | The exchange server and your wallet as separate programs |
+| `split_apps.go`, `web/exchange.html` | The `chains`, `exchange` and `wallet` commands, and the exchange's admin page |
+| `split_eth.go`, `split_apps_eth.go` | Ethereum in the separate programs |
+| `split_swap.go` | Swaps in the separate programs |
 
 ## Known limits
 

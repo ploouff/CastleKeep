@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Castlekeep exchange (admin)</title>
+<style>
+:root{--paper:#E8ECF0;--panel:#F6F8F9;--ink:#17212B;--steel:#55636F;--rule:#C3CCD5;--pine:#2D5D4C;--red:#A3322A;--amber:#AD7210;
+  --display:"Bahnschrift","DIN Alternate","Roboto Condensed","Arial Narrow",sans-serif;--body:"Segoe UI",system-ui,Arial,sans-serif;--mono:"Cascadia Mono",Consolas,monospace}
+*{box-sizing:border-box}
+html{background:var(--paper)}
+body{margin:0;font:15px/1.5 var(--body);color:var(--ink);font-variant-numeric:tabular-nums}
+header{padding:18px 28px;border-bottom:1px solid var(--rule);background:var(--panel)}
+h1{font:600 26px/1 var(--display);margin:0 0 4px;letter-spacing:.02em}
+header p{margin:0;color:var(--steel);font-size:14px}
+main{padding:22px 28px;display:grid;gap:22px}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:18px 20px}
+h2{font:600 19px var(--display);margin:0 0 10px;letter-spacing:.02em}
+.chains{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.btn{border:1px solid var(--rule);background:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font:inherit}
+.btn[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+input{font:inherit;border:1px solid var(--rule);border-radius:6px;padding:6px 10px;width:120px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.big{font:600 24px var(--display)}
+.muted{color:var(--steel);font-size:13.5px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{color:var(--steel);font-weight:600;font-size:13px}
+.mono{font-family:var(--mono);font-size:12.5px}
+.ev{color:var(--steel);font-size:12.5px;margin:0;padding-left:16px}
+.err{color:var(--red)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Castlekeep exchange</h1>
+  <p>Admin page of the exchange server. It holds only the exchange's keys; users' wallets hold theirs. Test networks only.</p>
+</header>
+<main>
+  <section class="panel"><h2>Chains</h2><div class="chains" id="chains"></div><p class="err" id="err"></p></section>
+  <section class="panel"><h2>Vaults</h2>
+    <p class="muted">Every vault a wallet has opened with this exchange, as the exchange sees it.</p>
+    <table><thead><tr><th>Vault</th><th>Account</th><th>Chain</th><th>Status</th><th>User's side</th><th>Exchange's side</th><th>States</th><th>Latest events</th></tr></thead><tbody id="vaults"></tbody></table>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const coin = (u, t) => (u / 1e8).toFixed(8).replace(/0+$/, "").replace(/\.$/, "") + " " + t;
+const usd = n => "$" + Math.round(n).toLocaleString("en-US");
+const modes = {honest: "Honest", offline: "Offline", malicious: "Malicious"};
+async function post(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.Error || r.statusText);
+  return j;
+}
+let editing = false;
+async function refresh() {
+  try {
+    const s = await post("/v1/state");
+    $("err").textContent = "";
+    if (!editing) $("chains").innerHTML = (s.Chains || []).map(c => `
+      <div>
+        <div class="muted">${esc(c.Ticker)} · exchange wallet ${esc(coin(c.Wallet, c.Ticker))}</div>
+        <div class="big">${usd(c.Price)}</div>
+        <div class="row"><input type="number" min="1" placeholder="New price" data-price="${esc(c.ID)}" aria-label="New ${esc(c.Ticker)} price">
+          <button class="btn" data-setprice="${esc(c.ID)}">Set price</button></div>
+        <div class="row" role="group" aria-label="${esc(c.Ticker)} exchange behaviour">${Object.keys(modes).map(m =>
+          `<button class="btn" data-chain="${esc(c.ID)}" data-mode="${m}" aria-pressed="${c.Mode === m}">${modes[m]}</button>`).join("")}</div>
+      </div>`).join("");
+    $("vaults").innerHTML = (s.Vaults || []).map(v => {
+      const t = v.Chain.toUpperCase();
+      return `<tr><td class="mono">${esc(v.ID.slice(0, 8))}</td><td class="mono">${esc(v.Account.slice(0, 8))}</td><td>${esc(t)}</td><td>${esc(v.Status)}</td>
+        <td>${esc(coin(v.UserSats, t))}</td><td>${esc(coin(v.ExchSats, t))}</td><td>${v.States}</td>
+        <td><ul class="ev">${(v.Events || []).slice(-3).map(e => `<li>${esc(e)}</li>`).join("")}</ul></td></tr>`;
+    }).join("") || `<tr><td colspan="8" class="muted">No vaults yet. Open one from a wallet.</td></tr>`;
+  } catch (e) { $("err").textContent = "Lost contact with the exchange server: " + e.message; }
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  try {
+    if (b.dataset.mode) await post("/v1/admin", {Chain: b.dataset.chain, Mode: b.dataset.mode});
+    if (b.dataset.setprice) {
+      const v = parseInt(document.querySelector(`[data-price="${b.dataset.setprice}"]`).value, 10);
+      if (v > 0) await post("/v1/admin", {Chain: b.dataset.setprice, USD: v});
+    }
+  } catch (err) { $("err").textContent = err.message; }
+  editing = false; refresh();
+});
+document.addEventListener("focusin", e => { if (e.target.matches("input")) editing = true; });
+document.addEventListener("focusout", e => { if (e.target.matches("input")) setTimeout(() => editing = false, 300); });
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>

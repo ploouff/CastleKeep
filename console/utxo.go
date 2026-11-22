@@ -53,9 +53,11 @@ type UTXOEngine struct {
 	progress    string
 	initErr     string
 
-	node *exec.Cmd
-	dir  string
-	rpc  *rpcclient.Client
+	node       *exec.Cmd
+	rpcAddr    string        // the node's RPC address, for the separate exchange and wallet programs
+	lastFaucet wire.OutPoint // the output the last faucet payment created
+	dir        string
+	rpc        *rpcclient.Client
 
 	miner   *btcec.PrivateKey
 	minerPk []byte
@@ -133,6 +135,7 @@ func (e *UTXOEngine) start() error {
 		return err
 	}
 	rpcAddr := fmt.Sprintf("127.0.0.1:%d", freePort())
+	e.rpcAddr = rpcAddr
 	e.node = exec.Command(e.cfg.NodePath, "--regtest", "--notls", "--txindex",
 		"--datadir="+filepath.Join(e.dir, "data"), "--logdir="+filepath.Join(e.dir, "logs"),
 		"--rpcuser=castlekeep", "--rpcpass=castlekeep",
@@ -443,7 +446,11 @@ func (e *UTXOEngine) faucetTo(to []byte, amt int64, label, okTitle string) error
 		return err
 	}
 	tx.TxIn[0].Witness = wit
-	return e.broadcast(tx, label, "Faucet key (ordinary key path)", nil, okTitle, "Faucet payment rejected")
+	if err := e.broadcast(tx, label, "Faucet key (ordinary key path)", nil, okTitle, "Faucet payment rejected"); err != nil {
+		return err
+	}
+	e.lastFaucet = wire.OutPoint{Hash: tx.TxHash(), Index: 0}
+	return nil
 }
 
 func (e *UTXOEngine) mine(n int) error {
@@ -1129,3 +1136,32 @@ func (e *UTXOEngine) Snapshot() Snapshot {
 
 // xonlyFor is used by tests.
 var _ = schnorr.SerializePubKey
+
+// RPCAddr is the node's RPC address (user and password "castlekeep").
+func (e *UTXOEngine) RPCAddr() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.rpcAddr
+}
+
+// Faucet pays amt test coins to a wallet script from the next mature
+// coinbase and returns the new output. Used by the separate wallet and
+// exchange programs, which have no mined coins of their own.
+func (e *UTXOEngine) Faucet(script []byte, amt int64) (wire.OutPoint, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.ready {
+		return wire.OutPoint{}, userErr("The %s test chain is still starting up.", e.cfg.Info.Name)
+	}
+	if err := e.faucetTo(script, amt, fmt.Sprintf("Test faucet: %s to another program", e.fmt(amt)), "Paid test "+e.cfg.Info.Ticker); err != nil {
+		return wire.OutPoint{}, err
+	}
+	return e.lastFaucet, nil
+}
+
+// Mine mines n blocks (and runs this engine's own watchtowers).
+func (e *UTXOEngine) Mine(n int) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.mine(n)
+}

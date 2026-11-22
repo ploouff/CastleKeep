@@ -33,6 +33,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -287,9 +288,15 @@ func (v *Vault) presignExit() {
 // user's share when there is one. It returns the transaction and the index
 // and amount of each side's output (-1 and 0 when a side gets nothing).
 func (v *Vault) payoutTx(prev wire.OutPoint, amt int64, userSats, exchSats int64, userScript, exchScript []byte) (tx *wire.MsgTx, ui int, ua int64, ei int, ea int64) {
+	return splitPayout(prev, amt, userSats, exchSats, userScript, exchScript)
+}
+
+// splitPayout is payoutTx without a vault, shared with the two-party code.
+func splitPayout(prev wire.OutPoint, amt int64, userSats, exchSats int64, userScript, exchScript []byte) (tx *wire.MsgTx, ui int, ua int64, ei int, ea int64) {
 	tx = wire.NewMsgTx(2)
 	tx.AddTxIn(wire.NewTxIn(&prev, nil, nil))
-	user := int64(float64(userSats) * float64(amt) / float64(userSats+exchSats))
+	// Exact integer maths: userSats*amt can pass 2^53, where float64 rounds.
+	user := new(big.Int).Div(new(big.Int).Mul(big.NewInt(userSats), big.NewInt(amt)), big.NewInt(userSats+exchSats)).Int64()
 	exch := amt - user
 	if user > txFee+546 {
 		user -= txFee

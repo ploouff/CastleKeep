@@ -169,12 +169,21 @@ func calldata(sig string, words ...[]byte) string {
 
 // stateDigest matches CastleVault.stateHash plus the "Ethereum Signed Message" prefix.
 func (e *EthEngine) stateDigest(id *big.Int, nonce int64, userUnits int64) []byte {
+	return e.digest("castlekeep-state", id, nonce, userUnits)
+}
+
+// settleDigest matches CastleVault.settleHash: both sign it only to settle.
+func (e *EthEngine) settleDigest(id *big.Int, nonce int64, userUnits int64) []byte {
+	return e.digest("castlekeep-settle", id, nonce, userUnits)
+}
+
+func (e *EthEngine) digest(tag string, id *big.Int, nonce int64, userUnits int64) []byte {
 	nb := make([]byte, 8)
 	for i := 0; i < 8; i++ {
 		nb[7-i] = byte(nonce >> (8 * i))
 	}
 	ca, _ := hex.DecodeString(strings.TrimPrefix(e.contract, "0x"))
-	h := keccak([]byte("castlekeep-state"), wordInt(e.chainID), ca, wordInt(id), nb, wordInt(toWei(userUnits)))
+	h := keccak([]byte(tag), wordInt(e.chainID), ca, wordInt(id), nb, wordInt(toWei(userUnits)))
 	return keccak([]byte("\x19Ethereum Signed Message:\n32"), h)
 }
 
@@ -855,7 +864,10 @@ func (e *EthEngine) settle() error {
 	info := &TxInfo{Label: fmt.Sprintf("Cooperative settlement of state #%d", l.Index), Path: "settle(): both signatures on the latest state",
 		Script: "settle(id, nonce, userAmount, userSig, exchangeSig)\nrequire(no exit in progress)\n" + ruleSig,
 		Inputs: []IO{{Label: "Vault #" + v.id.String(), Sats: v.amount, Ref: e.contract}}, Outputs: e.payoutIO(l.UserSats, l.ExchSats)}
-	if hash, err := e.send(e.userAddr, nil, e.stateCall("settle", l, l.userSig), info,
+	// Both sign the separate settle message now, for the latest state only.
+	d := e.settleDigest(v.id, int64(l.Index), l.UserSats)
+	settle := &ethState{Index: l.Index, UserSats: l.UserSats, exchSig: signDigest(e.exchKey, d)}
+	if hash, err := e.send(e.userAddr, nil, e.stateCall("settle", settle, signDigest(e.userKey, d)), info,
 		"Settled: your share is on its way back", "Settlement refused"); err == nil {
 		v.closeTx, v.closeKind = hash, "settled"
 	}
@@ -1080,4 +1092,99 @@ func (e *EthEngine) Snapshot() Snapshot {
 		s.Vault = vv
 	}
 	return s
+}
+
+// ------------------------------------------------------------------ for the separate programs
+
+// EthEndpoint is what the separate exchange and wallet programs need to use
+// the same node and contract.
+type EthEndpoint struct {
+	URL, Contract, Client string
+	ChainID               string // decimal
+	ExitDelay             int64
+}
+
+func (e *EthEngine) Endpoint() EthEndpoint {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	id := ""
+	if e.chainID != nil {
+		id = e.chainID.String()
+	}
+	return EthEndpoint{URL: e.url, Contract: e.contract, Client: e.client, ChainID: id, ExitDelay: e.cfg.ExitDelay}
+}
+
+// newEthLight is a bare EthEngine used only for its RPC, contract and
+// signing helpers by the separate programs. It holds no keys of its own.
+func newEthLight(ep EthEndpoint) *EthEngine {
+	id, _ := new(big.Int).SetString(ep.ChainID, 10)
+	return &EthEngine{url: ep.URL, contract: ep.Contract, client: ep.Client, chainID: id,
+		cfg: EthConfig{ExitDelay: ep.ExitDelay}, txs: map[string]*TxInfo{}, ready: true}
+}
+
+// FundAddress adds test ETH to an address and lets the node send from it.
+// (On the test node, transactions are sent through the node's account
+// unlocking; the state and settle signatures are made with each program's
+// own key, and those are what the contract checks before moving money.)
+func (e *EthEngine) FundAddress(addr string, units int64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	bal := new(big.Int).Add(e.balance(addr), toWei(units))
+	if _, err := e.call(e.client+"_setBalance", addr, "0x"+bal.Text(16)); err != nil {
+		return err
+	}
+	_, err := e.call(e.client+"_impersonateAccount", addr)
+	return err
+}
+
+// MineEth mines n blocks, or one block secs seconds later.
+func (e *EthEngine) MineEth(n int, secs int64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.mine(n, secs)
+}
+
+// ethChainVault is the contract's record of a vault.
+type ethChainVault struct {
+	user, exchange                                 string
+	amount, userDep, exchDep, exitDelay, exitStart int64
+	bestNonce, bestUser                            int64
+	hasBest, closed                                bool
+}
+
+func (e *EthEngine) readVaultID(id *big.Int) (ethChainVault, error) {
+	b, err := e.ethCall(calldata("vaults(uint256)", wordInt(id)))
+	if err != nil || len(b) < 11*32 {
+		return ethChainVault{}, errors.New("couldn't read the vault")
+	}
+	w := func(i int) *big.Int { return new(big.Int).SetBytes(b[i*32 : (i+1)*32]) }
+	addr := func(i int) string { return "0x" + hex.EncodeToString(b[i*32+12:(i+1)*32]) }
+	return ethChainVault{user: addr(0), exchange: addr(1), amount: fromWei(w(2)), userDep: fromWei(w(3)), exchDep: fromWei(w(4)),
+		exitDelay: w(5).Int64(), exitStart: w(6).Int64(), bestNonce: w(7).Int64(), bestUser: fromWei(w(8)),
+		hasBest: w(9).Sign() != 0, closed: w(10).Sign() != 0}, nil
+}
+
+// recoverAddr returns the Ethereum address that made sig (r||s||v) over digest.
+func recoverAddr(digest, sig []byte) string {
+	if len(sig) != 65 {
+		return ""
+	}
+	c := append([]byte{sig[64]}, sig[:64]...)
+	pk, _, err := secpecdsa.RecoverCompact(c, digest)
+	if err != nil {
+		return ""
+	}
+	return "0x" + hex.EncodeToString(keccak(pk.SerializeUncompressed()[1:])[12:])
+}
+
+// settleCall is the calldata for settle() with both settle signatures.
+func (e *EthEngine) settleCall(id *big.Int, nonce, userUnits int64, userSig, exchSig []byte) string {
+	return calldata("settle(uint256,uint64,uint256,(uint8,bytes32,bytes32),(uint8,bytes32,bytes32))",
+		wordInt(id), wordU(nonce), wordInt(toWei(userUnits)), sigWords(userSig), sigWords(exchSig))
+}
+
+// submitCall is the calldata for submitState() with both state signatures.
+func (e *EthEngine) submitCall(id *big.Int, nonce, userUnits int64, userSig, exchSig []byte) string {
+	return calldata("submitState(uint256,uint64,uint256,(uint8,bytes32,bytes32),(uint8,bytes32,bytes32))",
+		wordInt(id), wordU(nonce), wordInt(toWei(userUnits)), sigWords(userSig), sigWords(exchSig))
 }
