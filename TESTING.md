@@ -1,0 +1,126 @@
+# Testing Castlekeep
+
+Test networks only. Nothing here uses real coins, and the code has not been audited.
+
+All commands are for PowerShell or Command Prompt on Windows, run from the folders shown.
+
+## A. The automatic tests
+
+1. Make sure Hardhat is running in its own window (needed for the Ethereum tests):
+   ```
+   cd %USERPROFILE%\castlekeep-eth
+   npx.cmd hardhat node
+   ```
+2. In another window:
+   ```
+   cd console
+   go test -v -timeout 30m
+   ```
+3. It takes about 20 seconds. The last lines should say `PASS` and `ok castlekeep-console`.
+   Every `--- PASS` line is one scenario; a `--- FAIL` line is followed by what was expected
+   and what happened.
+
+Stop any console that uses the same Hardhat node first (Ctrl+C): both mine blocks and move
+Hardhat's clock. Without Hardhat, the Ethereum tests are skipped with a message.
+
+## B. The one-program console
+
+```
+cd console
+go run . -eth-rpc http://127.0.0.1:8545
+```
+
+The page opens at `http://127.0.0.1:8080`. Wait for the green dots on the tabs.
+
+**Buy new BTC.** On the Bitcoin tab: lock `1`, Mine 1 block. In the vault's "Buy more than
+you sell" box click **Ask the exchange to lock BTC**, Mine 1 block. Click **Add $10,000 test
+cash** six times (0.8 BTC costs $52,000). In the Exchange panel choose **Buy**, enter `0.8`,
+**Sign and buy**. **Settle with the exchange**, Mine 1 block. Your wallet goes up by about
+0.798 BTC.
+
+**Cheat as the user.** On Bitcoin: lock 1, mine, sell 0.6. Click **Request exit**, then
+straight away **Publish an older state yourself**. Mine 1 block. The vault note says the
+exchange's watchtower took your share: you lose the whole vault.
+
+**Swap coins.** Open a vault on Bitcoin and on Ethereum (lock 1, mine, on each). On Ethereum
+ask the exchange to lock 1 ETH and mine. On the Bitcoin tab, in "Swap into another coin",
+enter `0.04`, pick **into ETH**, **Sign and swap**. The account bar shows 0.04 less BTC and
+about 0.867 more ETH; cash and the total are unchanged.
+
+**A malicious exchange.** Lock, mine, sell 0.5, buy 0.5 back. Set the exchange to
+**Malicious**, **Request exit**, mine twice (on Ethereum: then **Skip 1 day** and **Pay out
+after the window**). You get the whole vault back.
+
+## C. The separate programs
+
+Three windows, in this order (start Hardhat first to include Ethereum):
+
+```
+cd console
+go run . chains
+```
+Wait about a minute, until it has mined its first blocks.
+```
+cd console
+go run . exchange
+```
+```
+cd console
+go run . wallet
+```
+
+- Your wallet: `http://127.0.0.1:9300` (the usual page)
+- The exchange's admin page: `http://127.0.0.1:9200`
+
+Try any recipe from B on the wallet page; they behave the same, except "Have the exchange
+try to steal", which explains why it isn't available there (the exchange's keys aren't in
+your wallet).
+
+On the admin page, switch a coin between Honest, Offline and Malicious, then request an exit
+from your wallet and mine: the admin page's Vaults table shows what the exchange did, and
+your wallet shows what your watchtower did. Change a price there: the wallet's price and swap
+estimate follow it.
+
+Ctrl+C in each window stops it; the chains window also stops its test nodes.
+
+## D. The order book (two users)
+
+Start the chains and the exchange as in C, then two wallets instead of one, each in its own
+window:
+
+```
+cd console
+go run . wallet -name alice
+```
+```
+cd console
+go run . wallet -name bob -port 9301
+```
+
+- Alice: `http://127.0.0.1:9300` · Bob: `http://127.0.0.1:9301` · admin: `http://127.0.0.1:9200`
+
+1. **Both lock coins.** On each page, Bitcoin tab: lock `1`, Mine 1 block.
+2. **Bob gets buying capacity.** On Bob's page: **Ask the exchange to lock BTC**, Mine 1 block
+   twice. Click **Add $10,000 test cash** twice.
+3. **Alice sells.** On Alice's page, in the Order book panel: **Sell**, price `64000`,
+   amount `0.3`, **Place sell order**. Both pages' book now shows 0.3 BTC at $64,000.
+4. **Bob buys above her price.** On Bob's page: **Buy**, price `64500`, amount `0.2`,
+   **Place buy order**. It matches straight away at Alice's $64,000:
+   - Bob's vault has a new state "Bought 0.2 BTC at $64,000 (order book)", and his cash is
+     $12,800 lower.
+   - Within a couple of seconds Alice's wallet signs her side: her share is 0.8 BTC and her
+     cash is $12,800 higher.
+   - The book shows 0.1 BTC left at $64,000, and the price is now $64,000.
+5. **Cancel.** On Alice's page, **Cancel** next to her order. The book is empty again.
+6. **Refused orders** (red message): selling more than your vault holds, buying with no
+   buying capacity, or buying with too little cash.
+7. The admin page's **Order books** section lists every open order by account
+   (`alice-…`, `bob-…`) and the recent trades.
+
+Works the same on Litecoin and Ethereum (on Ethereum, Bob asks the exchange to lock ETH).
+
+## What a failure looks like
+
+- Automatic tests: a `--- FAIL` line with the expected and actual values.
+- Pages: a red message in the bottom-right corner and a red "Refused" entry in the Activity
+  log. Some refusals are expected, for example **Claim alone** before the exit window ends.

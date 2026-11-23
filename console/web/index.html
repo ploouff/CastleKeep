@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Castlekeep</title>
+<style>
+:root{
+  --paper:#E8ECF0; --panel:#F6F8F9; --ink:#17212B; --steel:#55636F; --rule:#C3CCD5; --rule-soft:#D8DEE4;
+  --pine:#2D5D4C; --pine-tint:#DAE7E0; --slate:#3E5878; --slate-tint:#DCE3EC;
+  --amber:#AD7210; --amber-tint:#F3E5C9; --red:#A3322A; --red-tint:#F2DAD6;
+  --display:"Bahnschrift","DIN Alternate","DIN 2014","Barlow","Roboto Condensed","Arial Narrow",sans-serif;
+  --body:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --mono:"Cascadia Mono",Consolas,"SF Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html{background:var(--paper)}
+body{margin:0;font:15px/1.5 var(--body);color:var(--ink);font-variant-numeric:tabular-nums}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--slate);outline-offset:2px}
+.num{font-family:var(--display);font-weight:600;letter-spacing:.01em}
+.mono{font-family:var(--mono);font-size:12.5px;word-break:normal;overflow-wrap:anywhere}
+.muted{color:var(--steel)}
+.small{font-size:13px}
+
+/* header */
+header{display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:18px 28px;border-bottom:1px solid var(--rule);background:var(--panel)}
+.brand{display:flex;align-items:baseline;gap:14px;flex:1 1 auto;min-width:260px}
+.brand h1{font:600 28px/1 var(--display);margin:0;letter-spacing:.02em}
+.brand p{margin:0;color:var(--steel);font-size:14px}
+.chain{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.height{display:flex;flex-direction:column;line-height:1.1}
+.height b{font:600 26px/1 var(--display)}
+.height span{font-size:12.5px;color:var(--steel)}
+.mine{display:flex;gap:6px}
+
+/* buttons */
+.btn{border:1px solid var(--rule);background:#fff;border-radius:6px;padding:7px 13px;cursor:pointer;white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--steel)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--pine);border-color:var(--pine);color:#fff}
+.btn.primary:hover:not(:disabled){background:#244c3e}
+.btn.amber{border-color:var(--amber);color:#7a4f08}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.block{width:100%;white-space:normal}
+
+/* layout */
+main{display:grid;grid-template-columns:minmax(250px,290px) minmax(0,1fr) minmax(280px,330px);gap:22px;padding:22px 28px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:18px 20px}
+.panel h2{font:600 19px/1.2 var(--display);margin:0 0 4px;letter-spacing:.02em}
+.panel .sub{margin:0 0 14px;color:var(--steel);font-size:13.5px}
+.stack>*+*{margin-top:14px}
+.divider{border:0;border-top:1px solid var(--rule-soft);margin:16px 0}
+.figure{font:600 30px/1.1 var(--display)}
+.figure small{font-size:15px;color:var(--steel);font-weight:500}
+label{display:block;font-size:13.5px;color:var(--steel);margin-bottom:5px}
+.field{display:flex;gap:8px}
+.field input{flex:1;min-width:0;width:100%;border:1px solid var(--rule);border-radius:6px;padding:7px 10px;background:#fff}
+.hint{font-size:13px;color:var(--steel);margin:6px 0 0}
+
+/* vault */
+.vault{border:2px solid var(--pine);background:#FBFCFC;border-radius:12px;padding:22px 24px}
+.vault-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.status{font-size:13.5px;padding:4px 10px;border-radius:999px;background:var(--rule-soft);color:var(--ink)}
+.status.open{background:var(--pine-tint);color:var(--pine)}
+.status.wait{background:var(--amber-tint);color:#7a4f08}
+.status.closed{background:var(--slate-tint);color:var(--slate)}
+.keys{display:flex;gap:10px;margin:16px 0 4px;flex-wrap:wrap}
+.key{display:flex;align-items:center;gap:9px;border:1px solid var(--rule);border-radius:8px;padding:8px 12px;background:#fff;font-size:14px}
+.key svg{flex:none}
+.keys-note{font-size:13px;color:var(--steel);margin:6px 0 18px}
+.split-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.bar{display:flex;height:16px;border-radius:4px;overflow:hidden;background:var(--rule-soft)}
+.bar i{display:block;height:100%;transition:width .35s ease}
+.bar .you{background:var(--pine)} .bar .buy{background:var(--slate)}
+.legend{display:flex;gap:22px;margin-top:9px;font-size:13.5px;flex-wrap:wrap}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:7px;vertical-align:-1px;background:var(--c)}
+
+/* exit clock: the one memorable element */
+.clock{margin-top:22px;padding:16px 16px 14px;border-radius:10px;background:#fff;border:1px solid var(--rule-soft)}
+.clock-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.clock-head h3{font:600 16px/1.2 var(--display);margin:0;letter-spacing:.02em}
+.ticks{display:grid;grid-template-columns:repeat(72,1fr);gap:3px}
+.ticks i{height:18px;border-radius:2px;background:var(--rule-soft);transition:background-color .25s ease}
+.ticks i.on{background:var(--amber)}
+.ticks.done i.on{background:var(--pine)}
+.ticks.idle i{background:#E3E8EC}
+.clock-foot{display:flex;justify-content:space-between;font-size:12.5px;color:var(--steel);margin-top:7px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+.actions .btn{padding:9px 16px}
+.states{width:100%;border-collapse:collapse;font-size:14px;margin-top:6px}
+.states th{font-weight:500;color:var(--steel);text-align:left;font-size:13px;padding:6px 8px;border-bottom:1px solid var(--rule)}
+.states td{padding:7px 8px;border-bottom:1px solid var(--rule-soft)}
+.states td.r,.states th.r{text-align:right}
+.states tr.latest td{background:var(--pine-tint)}
+details summary{cursor:pointer;color:var(--slate);font-size:14px}
+details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:10px;white-space:pre-wrap;margin:8px 0 0}
+.empty{text-align:center;padding:36px 12px}
+.empty p{max-width:38ch;margin:8px auto 0;color:var(--steel)}
+
+/* exchange */
+.price{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.price .figure{min-width:6ch}
+.seg{display:flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden;background:#fff}
+.seg button{flex:1;border:0;background:transparent;padding:7px 8px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--rule)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.mode-desc{font-size:13px;color:var(--steel);margin:7px 0 0;min-height:2.6em}
+
+/* order book (separate programs only) */
+.bookp{margin:0 28px 22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(260px,320px);gap:22px}
+.bookp h3{font:600 16px var(--display);margin:0 0 6px}
+.bt{width:100%;border-collapse:collapse;font-size:14px}
+.bt th{font-weight:500;color:var(--steel);text-align:left;font-size:12.5px;padding:4px 6px;border-bottom:1px solid var(--rule)}
+.bt td{padding:5px 6px;border-bottom:1px solid var(--rule-soft)}
+.bt td.r,.bt th.r{text-align:right}
+.bt tr.ask td:first-child{color:var(--red)} .bt tr.bid td:first-child{color:var(--pine)}
+.bt tr.mid td{background:#fff;font-weight:600;text-align:center}
+@media (max-width:1100px){.bookp{grid-template-columns:1fr}}
+
+/* bottom */
+.lower{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:22px;padding:0 28px 40px}
+.log{list-style:none;margin:0;padding:0;max-height:560px;overflow:auto}
+.log li{border-left:3px solid var(--rule);padding:8px 12px 9px;margin-bottom:6px;background:#fff;border-radius:0 6px 6px 0}
+.log li.ok{border-color:var(--pine)} .log li.bad{border-color:var(--red);background:#FCF6F5}
+.log li.warn{border-color:var(--amber)} .log li.sign{border-color:var(--slate)}
+.log .t{font-weight:600;font-size:14.5px}
+.log li.bad .t{color:var(--red)}
+.log .d{font-size:13.5px;color:var(--steel);margin-top:2px}
+.log .m{font-size:12.5px;color:var(--steel);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}
+.link{background:none;border:0;padding:0;color:var(--slate);text-decoration:underline;cursor:pointer;font-size:12.5px}
+.txlist{list-style:none;margin:12px 0 0;padding:0;max-height:220px;overflow:auto;border-top:1px solid var(--rule-soft)}
+.txlist button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--rule-soft);padding:7px 4px;cursor:pointer;font-size:13.5px}
+.txlist button[aria-current="true"]{background:var(--slate-tint)}
+.chip{font-size:12px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.chip.confirmed{background:var(--pine-tint);color:var(--pine)}
+.chip.mempool{background:var(--amber-tint);color:#7a4f08}
+.chip.rejected{background:var(--red-tint);color:var(--red)}
+.io{width:100%;border-collapse:collapse;font-size:13.5px}
+.io td{padding:5px 0;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+.io td.r{text-align:right;white-space:nowrap;padding-left:12px}
+.insp h3{font:600 17px/1.25 var(--display);margin:0 0 6px}
+.insp dl{margin:12px 0 0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13.5px}
+.insp dt{color:var(--steel)}
+.insp dd{margin:0}
+.insp .err{background:var(--red-tint);color:var(--red);padding:8px 10px;border-radius:6px;font-size:13.5px;margin-top:10px}
+
+/* guide */
+.guide{margin:22px 28px 0;background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:12px 20px}
+.guide summary{font:600 16px var(--display);color:var(--ink);letter-spacing:.02em}
+.recipes{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px;margin:12px 0 6px}
+.recipes h4{margin:0 0 4px;font-size:14.5px}
+.recipes p{margin:0;font-size:13.5px;color:var(--steel)}
+
+/* overlay + toast */
+.overlay{display:flex;align-items:center;justify-content:center;padding:80px 24px;min-height:60vh}
+.overlay .box{max-width:460px}
+.overlay h2{font:600 30px/1.15 var(--display);margin:0 0 10px}
+.loading{height:6px;background:var(--rule-soft);border-radius:3px;overflow:hidden;margin-top:18px}
+.loading i{display:block;height:100%;width:30%;background:var(--pine);animation:slide 1.4s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
+.toast{position:fixed;right:24px;bottom:24px;max-width:380px;background:var(--ink);color:#fff;padding:12px 16px;border-radius:8px;font-size:14px;z-index:20;box-shadow:0 6px 24px rgba(23,33,43,.25)}
+.toast.err{background:var(--red)}
+[hidden]{display:none!important}
+.busy{cursor:progress}
+
+@media (max-width:1100px){
+  main{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  main .vault{grid-column:1 / -1;order:-1}
+  .lower{grid-template-columns:1fr}
+}
+@media (max-width:680px){
+  main{grid-template-columns:minmax(0,1fr);padding:16px}
+  header{padding:14px 16px;gap:14px}
+  .brand{min-width:0;flex-direction:column;gap:4px}
+  .chain{width:100%}
+  .mine{flex-wrap:wrap}
+  .mine .btn{flex:1 1 auto}
+  .lower{padding:0 16px 32px}
+  .guide{margin:16px 16px 0}
+  .ticks{grid-template-columns:repeat(48,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* chains */
+.tabs{display:flex;gap:6px;padding:0 28px;border-bottom:1px solid var(--rule);background:var(--panel);flex-wrap:wrap}
+.tab{display:flex;align-items:center;gap:8px;border:0;background:none;padding:10px 14px 11px;cursor:pointer;font:600 15px var(--display);letter-spacing:.02em;color:var(--steel);border-bottom:3px solid transparent;margin-bottom:-1px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--pine)}
+.tab .dot{width:8px;height:8px;border-radius:50%;background:var(--rule)}
+.tab .dot.ready{background:var(--pine)} .tab .dot.starting{background:var(--amber)} .tab .dot.missing{background:var(--rule);outline:1px solid var(--steel)}
+.tab small{font:400 12.5px var(--body);color:var(--steel)}
+.model{margin:14px 28px 0;font-size:14px;color:var(--steel)}
+.model b{color:var(--ink);font-weight:600}
+.missing-box{max-width:620px}
+.missing-box pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:10px 12px;white-space:pre-wrap;word-break:normal;overflow-wrap:anywhere}
+.switch{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px}
+.switch input{width:18px;height:18px;accent-color:var(--pine)}
+.best{font-size:13.5px;margin-top:8px}
+@media (max-width:680px){.tabs{padding:0 12px}.model{margin:12px 16px 0}}
+/* one account across every chain */
+.acct{display:flex;flex-wrap:wrap;align-items:stretch;padding:0 28px;background:var(--panel);border-bottom:1px solid var(--rule)}
+.acct .cell{padding:10px 18px 10px 0;margin-right:18px;border-right:1px solid var(--rule-soft);min-width:150px}
+.acct .cell:last-of-type{border-right:0}
+.acct .k{font-size:12.5px;color:var(--steel)}
+.acct .v{font:600 18px/1.25 var(--display)}
+.acct .d{font-size:12.5px;color:var(--steel)}
+.acct .total .v{color:var(--pine)}
+.acct .go{align-self:center;margin-left:auto}
+select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px;padding:7px 8px;background:#fff}
+@media (max-width:680px){.acct{padding:0 12px}.acct .cell{min-width:130px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Castlekeep <span id="who" style="font-size:.6em;color:var(--steel);font-weight:500"></span></h1>
+    <p>Trade from a vault the exchange can't empty. Running on private test chains.</p>
+  </div>
+  <div class="chain">
+    <div class="height"><b id="height">–</b><span id="mempool">Block height</span></div>
+    <div class="mine" role="group" aria-label="Move the chain forward" id="mineBtns"></div>
+  </div>
+</header>
+<section class="acct" id="acct" aria-label="Your test account across every coin"></section>
+<nav class="tabs" role="tablist" aria-label="Choose a blockchain" id="tabs"></nav>
+<p class="model" id="model"></p>
+
+<section class="overlay" id="overlay" hidden>
+  <div class="box" id="overlayBox"></div>
+</section>
+
+<div id="app" hidden>
+<details class="guide" id="guide" open>
+  <summary>Things to try</summary>
+  <div class="recipes" id="recipes"></div>
+</details>
+
+<main>
+  <section class="panel" aria-labelledby="w-h">
+    <h2 id="w-h">Your wallet</h2>
+    <p class="sub">Coins only you control.</p>
+    <div class="figure" id="wallet">–</div>
+    <p class="hint" id="walletPending"></p>
+    <button class="btn block" id="faucet" style="margin-top:12px">Get 1 test coin</button>
+    <hr class="divider">
+    <label for="lockAmt">Lock into a new vault</label>
+    <div class="field">
+      <input id="lockAmt" type="number" min="0.001" step="0.1" value="1" inputmode="decimal" aria-describedby="lockHint">
+      <button class="btn primary" id="lock">Lock</button>
+    </div>
+    <p class="hint" id="lockHint"></p>
+    <hr class="divider">
+    <h2 style="font-size:16px">Cash on the exchange</h2>
+    <div class="figure" style="font-size:24px" id="cash">$0</div>
+    <button class="btn block" id="addCash" style="margin-top:10px" hidden>Add $10,000 test cash</button>
+    <p class="hint" id="cashHint"></p>
+  </section>
+
+  <section class="vault" aria-labelledby="v-h" id="vaultPanel"></section>
+
+  <section class="panel" aria-labelledby="x-h">
+    <h2 id="x-h">Exchange</h2>
+    <p class="sub">The order book and the other key holder.</p>
+    <label for="priceInput" id="priceLabel">Price (USD)</label>
+    <div class="price"><span class="figure" id="price">–</span></div>
+    <div class="field" style="margin-top:8px" id="priceSteps"></div>
+    <div class="field" style="margin-top:8px">
+      <input id="priceInput" type="number" min="1" step="1" placeholder="New price" aria-label="New price in dollars">
+      <button class="btn" id="setPrice">Set price</button>
+    </div>
+    <hr class="divider">
+    <label>Place an order</label>
+    <div class="seg" role="group" aria-label="Order side">
+      <button aria-pressed="true" data-side="sell">Sell</button>
+      <button aria-pressed="false" data-side="buy">Buy back</button>
+    </div>
+    <div class="field" style="margin-top:10px">
+      <input id="orderAmt" type="number" min="0" step="0.1" value="0.6" inputmode="decimal" aria-label="Amount">
+      <span class="muted" style="align-self:center" id="orderUnit"></span>
+    </div>
+    <p class="hint" id="orderEst"></p>
+    <button class="btn primary block" id="order" style="margin-top:10px">Sign and sell</button>
+    <p class="hint" id="orderHint"></p>
+    <hr class="divider">
+    <label for="swapTo">Swap into another coin</label>
+    <p class="hint" style="margin:0 0 8px">One order: sell <span id="swapFrom"></span> from this vault and buy another coin with the money, at the prices shown. No cash is used.</p>
+    <div class="field">
+      <input id="swapAmt" type="number" min="0" step="0.01" value="0.04" inputmode="decimal" aria-label="Amount to swap">
+      <span class="muted" style="align-self:center" id="swapUnit"></span>
+      <select id="swapTo" aria-label="Coin to buy"></select>
+    </div>
+    <p class="hint" id="swapEst"></p>
+    <button class="btn primary block" id="swap" style="margin-top:10px">Sign and swap</button>
+    <p class="hint" id="swapHint">The exchange signs the new state for the coin you buy first. Only then do you sign the sale, so you never give up one coin without already holding the other.</p>
+    <hr class="divider">
+    <label>How the exchange behaves</label>
+    <div class="seg" role="group" aria-label="Exchange behaviour" id="modes">
+      <button data-mode="honest">Honest</button>
+      <button data-mode="offline">Offline</button>
+      <button data-mode="malicious">Malicious</button>
+    </div>
+    <p class="mode-desc" id="modeDesc"></p>
+    <div id="wtBox" hidden>
+      <label class="switch"><input type="checkbox" id="wt"> Your watchtower is on</label>
+      <p class="hint" id="wtHint">It watches exits for you and submits your newest signed state if an older one shows up.</p>
+    </div>
+    <button class="btn danger block" id="steal" style="margin-top:12px">Have the exchange try to steal</button>
+    <hr class="divider">
+    <p class="small muted" style="margin:0">Exchange wallet change since the start: <span class="num" id="exchWallet">0</span></p>
+  </section>
+</main>
+
+<section class="panel bookp" id="bookPanel" aria-labelledby="b-h" hidden>
+  <div>
+    <h2 id="b-h">Order book</h2>
+    <p class="sub">Every wallet using this exchange. Sells (asks) on top, buys (bids) below.</p>
+    <table class="bt" id="bookTable"></table>
+  </div>
+  <div>
+    <h3>Your orders</h3>
+    <table class="bt" id="myOrders"></table>
+    <h3 style="margin-top:18px">Recent trades</h3>
+    <table class="bt" id="trades"></table>
+  </div>
+  <div>
+    <h3>Place a limit order</h3>
+    <div class="seg" role="group" aria-label="Limit order side">
+      <button aria-pressed="true" data-bside="sell">Sell</button>
+      <button aria-pressed="false" data-bside="buy">Buy</button>
+    </div>
+    <label for="lpPrice" style="margin-top:10px;display:block">Price per coin (USD)</label>
+    <div class="field"><input id="lpPrice" type="number" min="1" step="1" inputmode="numeric"></div>
+    <label for="lpAmt" style="margin-top:8px;display:block">Amount</label>
+    <div class="field"><input id="lpAmt" type="number" min="0" step="0.01" value="0.1" inputmode="decimal"><span class="muted" style="align-self:center" id="lpUnit"></span></div>
+    <p class="hint" id="lpEst"></p>
+    <button class="btn primary block" id="lpBtn" style="margin-top:8px">Place order</button>
+    <p class="hint" id="lpHint">It matches the best opposite order first, at that order's price. Until it fills, the coins (or cash) it needs are set aside. Your wallet signs each fill only after checking it against this order: same coin and side, not more than you asked for, at your price or better.</p>
+  </div>
+</section>
+
+<div class="lower">
+  <section class="panel" aria-labelledby="a-h">
+    <h2 id="a-h">Activity</h2>
+    <p class="sub">Newest first. Every accepted or refused transaction came from the chain itself.</p>
+    <ol class="log" id="log" aria-live="polite"></ol>
+  </section>
+  <section class="panel insp" aria-labelledby="i-h">
+    <h2 id="i-h">Transaction inspector</h2>
+    <p class="sub">Pick a transaction to see what it moves and which rule decided it.</p>
+    <div id="inspector"><p class="muted small">No transaction selected yet.</p></div>
+    <ul class="txlist" id="txlist"></ul>
+  </section>
+</div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let chains = [], cur = null, S = null, A = null, side = "sell", selectedTx = null, busy = false, lastChain = null;
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const T = () => (S && S.chain.ticker) || "";
+const coin = (u, dp = 8) => {
+  let s = (u / 1e8).toFixed(dp);
+  if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  return s + " " + T();
+};
+const usd = n => "$" + Math.round(n).toLocaleString("en-US");
+const coinOf = (u, t, dp = 8) => {
+  let s = (u / 1e8).toFixed(dp);
+  if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  return s + " " + t;
+};
+const shortId = t => t && t.length > 20 ? t.slice(0, 10) + "…" + t.slice(-6) : (t || "");
+const dur = mins => {
+  if (mins < 1) return `${Math.max(1, Math.round(mins * 60))} seconds`;
+  if (mins < 60) return `about ${Math.round(mins)} minutes`;
+  const h = Math.round(mins / 60);
+  return `about ${h} hour${h === 1 ? "" : "s"}`;
+};
+
+const modeText = {
+  honest: "Online. Signs settlements, and if you exit it publishes your latest signed state.",
+  offline: "Gone. Won't take orders, sign settlements or answer an exit.",
+  malicious: "Refuses to settle. If an exit happens it publishes whichever of your signed states pays it most."
+};
+
+function recipes(c) {
+  const day = (c.mineButtons.find(b => /day/i.test(b.label)) || {}).label || "the 1-day button";
+  const t = c.ticker;
+  const eth = c.id === "eth";
+  return [
+    ["A normal trade", `Lock 1 ${t}, mine a block, sell 0.6 ${t}, then settle and mine a block. Your unsold ${t} returns with no waiting.`],
+    ["The exchange disappears", `Lock and confirm, set the exchange to offline, request an exit, mine a block. Try "${c.claimLabel}" (refused), press "${day}", mine a block, then try again.`],
+    ["Try to undo a sale", `Sell 0.6, raise the price, request an exit and mine a block. The exchange ${eth ? "submits" : "publishes"} the sale you already signed.`],
+    eth
+      ? ["A malicious exchange", `Sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit and mine twice. It submits your old state, then your watchtower replaces it with the newer one. Turn the watchtower off to see what happens without it.`]
+      : ["A malicious exchange", `Sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit and mine twice. It publishes your older state, and your watchtower uses that state's revocation secret to take the exchange's share (a penalty sweep). Mine once more: you get the whole vault. Turn the watchtower off to see the exchange keep its share instead.`],
+    ["Attempted theft", `With a vault open, press "Have the exchange try to steal". It's refused because your signature is missing.`],
+    ...(eth ? [] : [["Cheat as the user", `Sell 0.6, request an exit, and before mining press "Publish an older state yourself". It publishes the state from before your sale. Mine a block: the exchange's watchtower uses your revocation secret to take your share. Try it with the exchange offline to see the old state stand.`]]),
+    ["Swap coins", eth
+      ? `Open a vault on Bitcoin too. Here, lock 1 ETH, ask the exchange to lock 1 ETH, and mine a block. On the Bitcoin tab, swap 0.04 BTC into ETH: both vaults get a new state, and the account bar at the top shows the result.`
+      : `Lock 1 ${t} here. On Ethereum, lock 1 ETH, ask the exchange to lock 1 ETH and mine a block. Back here, swap 0.04 ${t} into ETH. Once the exchange has locked some ${t} here too, you can also swap other coins into new ${t}.`]
+  ].concat(c.dualFund ? [["Buy new " + t, `Lock 1 ${t} and mine a block. Ask the exchange to lock 1 ${t}, mine a block, add enough test cash, then buy 0.8 ${t}. Settle and mine: your wallet gets about 1.8 ${t}.`]] : []);
+}
+
+function toast(msg, isErr) {
+  const t = $("toast");
+  t.textContent = msg; t.className = "toast" + (isErr ? " err" : ""); t.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, isErr ? 6000 : 3000);
+}
+
+async function act(body) {
+  if (busy || !cur) return;
+  busy = true; document.body.classList.add("busy");
+  const btns = [...document.querySelectorAll("#app button, #mineBtns button")];
+  const was = btns.map(b => b.disabled); btns.forEach(b => b.disabled = true);
+  try {
+    const r = await fetch("/api/action", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({chain: cur, ...body})});
+    const j = await r.json();
+    if (j.error) toast(j.error, true);
+    if (j.state && j.state.chain.id === cur) S = j.state;
+    await loadAccount();
+  } catch (e) {
+    toast("Lost contact with the console. Is the program still running?", true);
+  } finally {
+    busy = false; document.body.classList.remove("busy");
+    btns.forEach((b, i) => b.disabled = was[i]);
+    render();
+  }
+}
+
+async function pollChains() {
+  try {
+    chains = await (await fetch("/api/chains")).json();
+    if (!cur) {
+      const saved = (() => { try { return localStorage.getItem("ck-chain"); } catch (e) { return null; } })();
+      cur = (chains.find(c => c.id === saved) || chains.find(c => c.available) || chains[0]).id;
+    }
+    renderTabs();
+  } catch (e) {}
+  setTimeout(pollChains, 4000);
+}
+
+async function poll() {
+  if (cur) {
+    try {
+      const want = cur;
+      const s = await (await fetch("/api/state?chain=" + want)).json();
+      if (want === cur) { S = s; if (!busy) render(); }
+    } catch (e) {}
+  }
+  setTimeout(poll, S && S.ready ? 2500 : 800);
+}
+
+async function loadAccount() {
+  try { A = await (await fetch("/api/account")).json(); } catch (e) {}
+  renderAccount();
+}
+async function pollAccount() {
+  if (!busy) await loadAccount();
+  setTimeout(pollAccount, 2500);
+}
+
+// The account bar: every coin, the shared cash and the total, on every tab.
+function renderAccount() {
+  if (!A) return;
+  const cells = A.holdings.map(h => {
+    if (!h.ready) return `<div class="cell"><div class="k">${esc(h.name)}</div><div class="v muted">–</div><div class="d">starting or not installed</div></div>`;
+    const total = h.walletSats + h.vaultSats;
+    return `<div class="cell"><div class="k">${esc(h.name)} at ${usd(h.price)}</div><div class="v">${esc(coinOf(total, h.ticker, 4))}</div>
+      <div class="d">wallet ${esc(coinOf(h.walletSats, "", 4))}· vault ${esc(coinOf(h.vaultSats, "", 4))}· ${usd(h.valueCents / 100)}</div></div>`;
+  }).join("");
+  $("acct").innerHTML = cells +
+    `<div class="cell"><div class="k">Cash on the exchange</div><div class="v">${usd(A.cashCents / 100)}</div><div class="d">shared by every coin</div></div>
+     <div class="cell total"><div class="k">Total (test dollars)</div><div class="v">${usd(A.totalCents / 100)}</div><div class="d">coins at today's prices, plus cash</div></div>
+     <button class="btn go" id="acctCash">Add $10,000 test cash</button>`;
+  $("acctCash").onclick = () => act({action: "cash"});
+  if (S && S.ready && !busy) renderSwap();
+}
+
+function renderSwap() {
+  const c = S.chain;
+  const others = (A ? A.holdings : []).filter(h => h.chain !== c.id && h.ready);
+  const sel = $("swapTo"), keep = sel.value;
+  const opts = others.map(h => `<option value="${h.chain}">into ${esc(h.ticker)}</option>`).join("");
+  if (sel.dataset.opts !== opts) { sel.innerHTML = opts; sel.dataset.opts = opts; if (others.some(h => h.chain === keep)) sel.value = keep; }
+  const to = others.find(h => h.chain === sel.value);
+  const amt = parseFloat($("swapAmt").value) || 0;
+  $("swapEst").textContent = to && amt > 0
+    ? `You'd get about ${coinOf(Math.floor(amt * S.price / to.price * 1e8), to.ticker, 6)} (${usd(amt * S.price)}).`
+    : (others.length ? "" : "Start another chain to swap into it.");
+  const v = S.vault;
+  $("swap").disabled = busy || !to || !(v && v.status === "open");
+}
+
+function renderTabs() {
+  $("tabs").innerHTML = chains.map(c => {
+    const st = !c.available ? "missing" : c.ready ? "ready" : "starting";
+    const note = !c.available ? "not installed" : c.ready ? "" : "starting";
+    return `<button class="tab" role="tab" aria-selected="${c.id === cur}" data-chain="${c.id}"><span class="dot ${st}"></span>${esc(c.name)}${note ? ` <small>${note}</small>` : ""}</button>`;
+  }).join("");
+}
+
+function statusInfo(v) {
+  const claim = S.chain.claimLabel.toLowerCase();
+  switch (v.status) {
+    case "funding": return ["wait", "Deposit waiting for a block"];
+    case "open": return ["open", "Open for trading"];
+    case "exit_pending": return ["wait", "Exit request waiting for a block"];
+    case "exit_window": return ["wait", "Exit window running"];
+    case "ready": return ["wait", S.chain.id === "eth" ? "Window over: ready to pay out" : "Ready to claim alone"];
+    case "closing": return ["closed", "Closing, waiting for a block"];
+    case "closed": return ["closed", "Closed"];
+  }
+  return ["", v.status];
+}
+
+function keySvg(color) {
+  return `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="12" r="4.5" fill="none" stroke="${color}" stroke-width="2"/><path d="M12.5 12H21M18 12v3.5M21 12v2.5" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"/></svg>`;
+}
+
+function clockWords(v) {
+  const c = S.chain, total = v.clockTotal, done = v.clockDone, left = total - done;
+  const fmtSecs = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min`; };
+  if (c.clockUnit === "seconds") {
+    return {
+      head: v.clockReady ? "The full 24 hours have passed" : `${fmtSecs(done)} of 24 hours passed`,
+      sub: v.clockReady ? "Anyone can now pay the vault out." : `${fmtSecs(left)} left on the chain's clock.`,
+      foot: "24 hours on the chain's clock"
+    };
+  }
+  return {
+    head: v.clockReady ? `All ${total} blocks passed` : `${done} of ${total} blocks passed`,
+    sub: v.clockReady ? "You can now claim the coins without the exchange." : `${left} more before you can claim alone. That's ${dur(left * c.blockMinutes)} on the real network.`,
+    foot: `${total} blocks, about 24 hours`
+  };
+}
+
+function renderVault() {
+  const el = $("vaultPanel"), v = S.vault, c = S.chain;
+  if (!v) {
+    el.innerHTML = `<h2 id="v-h" style="font:600 22px var(--display);margin:0">Vault</h2>
+      <div class="empty">
+        <svg width="56" height="56" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><path d="M12 8.5v-1M12 16.5v-1M8.5 12h-1M16.5 12h-1" stroke="var(--pine)" stroke-width="1.5"/></svg>
+        <p>No vault open yet. Lock ${esc(c.ticker)} from your wallet to open one, then mine a block to confirm the deposit.</p>
+      </div>`;
+    return;
+  }
+  const [cls, label] = statusInfo(v);
+  const exchLabel = c.dualFund ? "Exchange's side" : "Owed to buyers";
+  const total = v.userSats + v.exchSats || 1;
+  const youPct = 100 * v.userSats / total, buyPct = 100 * v.exchSats / total;
+
+  const cells = 144, filled = v.clockStarted ? Math.floor(cells * v.clockDone / v.clockTotal) : 0;
+  let head = "Not started", sub = c.id === "eth"
+    ? "Starts when an exit request confirms. Only needed if the exchange stops cooperating."
+    : "Starts when an exit request confirms. Only needed if the exchange stops cooperating.";
+  let foot = c.clockUnit === "seconds" ? "24 hours on the chain's clock" : `${v.clockTotal} blocks, about 24 hours`;
+  if (v.exitSent && !v.clockStarted) { head = "Waiting for the exit request to confirm"; sub = "Mine a block to start the clock."; }
+  if (v.clockStarted) { const w = clockWords(v); head = w.head; sub = w.sub; foot = w.foot; }
+  const closeNotes = {
+    settled: "Settled with the exchange. Your share went back to your wallet.",
+    claimed: c.id === "eth" ? "You claimed the whole vault alone after the exit window." : "You claimed alone after the exit window: each side got back what it deposited.",
+    published: v.publishedBy === "user" ? "You closed the vault by publishing a state the exchange had signed." : "The exchange closed the vault by publishing a state you had signed.",
+    finalized: "The vault paid out after the window, using the newest submitted state."
+  };
+  if (v.closeKind === "published") sub = v.publishedBy === "user" ? "You published a signed state inside the window." : "The exchange answered inside the window by publishing a signed state.";
+  if (v.closeKind === "claimed") sub = "You claimed the coins alone after the clock ran out.";
+  const ticks = Array.from({length: cells}, (_, i) => `<i class="${i < filled ? "on" : ""}"></i>`).join("");
+  const closed = v.status === "closed" || v.status === "closing";
+  const canClaim = v.exitSent && !v.closeTxid;
+  const best = c.id === "eth" && v.clockStarted
+    ? `<p class="best">${v.bestState >= 0 ? `Newest state submitted so far: <b>#${v.bestState}</b>. Only a higher number can replace it.` : "No state submitted yet. If none is, you get the whole vault after the window."}</p>` : "";
+
+  const rev = !!v.revocation;
+  const revCell = s => !rev ? "" : `<td class="mono small">${s.secret
+    ? `secret <span title="${esc(s.secret)}">${esc(s.secret.slice(0, 10))}…</span>`
+    : `hash <span title="${esc(s.revHash)}">${esc((s.revHash || "").slice(0, 10))}…</span>`}</td>`;
+  const rows = v.states.slice().reverse().map((s, i) => `
+    <tr class="${i === 0 ? "latest" : ""}"><td>${s.index}</td><td>${esc(s.label)}</td>
+    <td class="r">${coin(s.userSats, 4)}</td><td class="r">${coin(s.exchSats, 4)}</td>${revCell(s)}</tr>`).join("");
+  const held = rev ? v.states.filter(s => s.secret) : [];
+  const revNote = !rev ? "" : `<p class="hint" style="margin:8px 0 0">${held.length
+    ? `Revocation secrets you hold: <b>${held.map(s => "#" + s.index).join(", ")}</b>. Those states are replaced. If the exchange publishes one of them, your watchtower uses its secret to take the exchange's share (a penalty sweep). The exchange holds your secrets for the same states, so the same goes for you. For the latest state you only have the hash.`
+    : "Revocation secrets you hold: none yet. Each time a newer state is signed, the exchange hands you the secret of the one it replaces."}</p>`;
+  let sweepNote = "";
+  if (v.sweepKind === "penalty") sweepNote = `The exchange published old state #${v.publishedState}, so your watchtower used revocation secret #${v.publishedState} to take the exchange's share (penalty sweep). You get the whole vault, less fees.`;
+  if (v.sweepKind === "exchange") sweepNote = `The exchange collected its share of state #${v.publishedState} after its ${v.penaltyDelay}-block wait.`;
+  if (v.sweepKind === "exchange-penalty") sweepNote = `You published old state #${v.publishedState}, so the exchange's watchtower used your revocation secret #${v.publishedState} to take your share (penalty sweep). The exchange gets the whole vault.`;
+  if (v.sweepKind === "user") sweepNote = `You collected your share of state #${v.publishedState} after the ${v.penaltyDelay}-block wait.`;
+  const scripts = (v.scripts || []).map(x => `<p class="small muted" style="margin:10px 0 4px">${esc(x.label)}</p><pre class="mono">${esc(x.text)}</pre>`).join("");
+
+  el.innerHTML = `
+    <div class="vault-head">
+      <div><h2 id="v-h" style="font:600 22px var(--display);margin:0">Vault</h2>
+      <div class="small muted">Locked <span class="num">${coin(v.locked)}</span></div></div>
+      <span class="status ${cls}">${label}</span>
+    </div>
+    <div class="keys" aria-label="Keys that must sign">
+      <span class="key">${keySvg("var(--pine)")}Your key</span>
+      <span class="key">${keySvg("var(--slate)")}Exchange key</span>
+    </div>
+    <p class="keys-note">Both keys must sign to move these coins. The only exception is the exit window, which protects you if the exchange stops cooperating.</p>
+    ${closed && closeNotes[v.closeKind] ? `<p class="small" style="margin:-6px 0 14px;color:var(--slate)">${closeNotes[v.closeKind]}${sweepNote ? " " + esc(sweepNote) : ""}</p>` : ""}
+    <div class="split-top"><span class="small muted">Latest signed split</span></div>
+    <div class="bar" role="img" aria-label="Yours ${coin(v.userSats)}, ${exchLabel.toLowerCase()} ${coin(v.exchSats)}">
+      <i class="you" style="width:${youPct}%"></i><i class="buy" style="width:${buyPct}%"></i>
+    </div>
+    <div class="legend">
+      <span style="--c:var(--pine)">Yours <b class="num">${coin(v.userSats)}</b></span>
+      <span style="--c:var(--slate)">${exchLabel} <b class="num">${coin(v.exchSats)}</b></span>
+    </div>
+    ${capacityBlock(v, c)}
+    <div class="clock" aria-labelledby="clock-h">
+      <div class="clock-head"><h3 id="clock-h">Exit clock</h3><span class="small">${head}</span></div>
+      <div class="ticks ${!v.exitSent ? "idle" : ""} ${v.clockReady ? "done" : ""}" role="progressbar" aria-valuemin="0" aria-valuemax="${v.clockTotal}" aria-valuenow="${v.clockDone}" aria-label="Exit clock">${ticks}</div>
+      <div class="clock-foot"><span>Exit request confirms</span><span>${foot}</span></div>
+      <p class="hint" style="margin-top:8px">${sub}</p>${best}
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="settle" ${v.status === "open" ? "" : "disabled"}>Settle with the exchange</button>
+      <button class="btn amber" id="exit" ${v.status === "open" ? "" : "disabled"}>Request exit</button>
+      <button class="btn" id="claim" ${canClaim ? "" : "disabled"}>${esc(c.claimLabel)}</button>
+      ${rev ? `<button class="btn danger" id="cheat" ${canClaim ? "" : "disabled"} title="Publish your copy of an older state that paid you more">Publish an older state yourself</button>` : ""}
+    </div>
+    <p class="hint">${v.status === "funding" ? "Mine a block to confirm your deposit before trading." :
+      v.status === "open" ? "Settling is instant when the exchange cooperates. Request an exit if it won't." : ""}</p>
+    <hr class="divider">
+    <h3 style="font:600 16px var(--display);margin:0 0 2px;letter-spacing:.02em">States you've signed</h3>
+    <p class="hint" style="margin:0 0 6px">${c.id === "eth" ? "Each trade creates a new split that you and the exchange both sign. The highest number always wins." : "Each trade creates a new split that you sign before the order is sent. The highlighted row is the latest."}</p>
+    <table class="states"><thead><tr><th>#</th><th>What happened</th><th class="r">Yours</th><th class="r">${exchLabel}</th>${rev ? "<th>Revocation</th>" : ""}</tr></thead><tbody>${rows}</tbody></table>${revNote}
+    <details style="margin-top:14px"><summary>${c.id === "eth" ? "Show the contract's rules" : "Show the vault's scripts"}</summary>
+      <p class="small muted" style="margin:10px 0 4px">${c.id === "eth" ? "Contract and vault" : "Vault address"}</p><pre class="mono">${esc(v.address)}</pre>${scripts}
+    </details>`;
+  const capBtn = $("capBtn");
+  if (capBtn) capBtn.onclick = () => act({action: "capacity", sats: Math.round((parseFloat($("capAmt").value) || 0) * 1e8)});
+  $("settle").onclick = () => act({action: "settle"});
+  $("exit").onclick = () => act({action: "exit", by: "user"});
+  $("claim").onclick = () => act({action: "claim"});
+  if ($("cheat")) $("cheat").onclick = () => act({action: "cheat"});
+}
+
+function capacityBlock(v, c) {
+  if (!c.dualFund) return "";
+  const eth = c.id === "eth";
+  if (v.fundPending) {
+    return `<p class="hint" style="margin-top:10px">The exchange's deposit is waiting for a block. Mine one to add the buying capacity.</p>`;
+  }
+  const info = v.exchDeposit > 0
+    ? `<p class="hint" style="margin-top:10px">You put in <b>${coin(v.userDeposit)}</b> and the exchange locked <b>${coin(v.exchDeposit)}</b> of buying capacity. You can buy up to <b>${coin(v.exchSats)}</b> more.</p>` : "";
+  // Ethereum's contract takes one deposit per vault; Bitcoin and Litecoin can add more with another splice.
+  if (v.status !== "open" || (eth && v.exchDeposit > 0)) return info;
+  const how = eth
+    ? `Ask the exchange to lock its own ${esc(c.ticker)} in your vault so you can buy from it.`
+    : `Ask the exchange to add its own ${esc(c.ticker)} to your vault so you can buy from it. You both sign one transaction that moves the vault and the exchange's coins into a bigger vault.`;
+  return info + `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:#fff">
+      <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 ? "Add more buying capacity" : "Buy more than you sell"}</label>
+      <p class="hint" style="margin:0 0 8px">${how} Fee: 0.2% of the amount, taken from your share.</p>
+      <div class="field"><input id="capAmt" type="number" min="0.001" step="0.5" value="1" inputmode="decimal" aria-label="Buying capacity in ${esc(c.ticker)}">
+      <button class="btn" id="capBtn">Ask the exchange to lock ${esc(c.ticker)}</button></div>
+    </div>`;
+}
+
+function renderLog() {
+  const log = $("log"), key = S.chain.id + ":" + S.events.length;
+  if (log.dataset.key === key) return;
+  log.dataset.key = key;
+  log.innerHTML = S.events.slice().reverse().map(e => `
+    <li class="${e.kind}"><div class="t">${esc(e.title)}</div>
+    ${e.detail ? `<div class="d">${esc(e.detail)}</div>` : ""}
+    <div class="m"><span>Block ${e.height}, ${e.time}</span>
+    ${e.txid ? `<button class="link" data-tx="${esc(e.txid)}">Inspect transaction</button>` : ""}</div></li>`).join("");
+}
+
+function renderTxs() {
+  const txs = S.txs || [];
+  if (!txs.find(x => x.txid === selectedTx)) selectedTx = txs.length ? txs[0].txid : null;
+  const label = st => st === "mempool" ? "waiting" : st;
+  $("txlist").innerHTML = txs.map(t => `<li><button data-tx="${esc(t.txid)}" aria-current="${t.txid === selectedTx}">
+    <span>${esc(t.label)}</span><span class="chip ${t.status}">${label(t.status)}</span></button></li>`).join("");
+  const t = txs.find(x => x.txid === selectedTx);
+  if (!t) { $("inspector").innerHTML = `<p class="muted small">No transactions yet.</p>`; return; }
+  const refText = ref => { const i = ref.lastIndexOf(":"); return i > 0 ? shortId(ref.slice(0, i)) + ref.slice(i) : shortId(ref); };
+  const ioRows = list => (list || []).map(io => `<tr><td>${esc(io.label)}<div class="mono muted">${esc(refText(io.ref || ""))}</div></td><td class="r num">${io.sats ? coin(io.sats) : ""}</td></tr>`).join("");
+  const eth = S.chain.id === "eth";
+  const statusText = t.status === "mempool" ? "Waiting for a block" : t.status === "confirmed" ? "Confirmed in block " + t.height : eth ? "Refused" : "Rejected by the node";
+  $("inspector").innerHTML = `
+    <h3>${esc(t.label)}</h3>
+    <span class="chip ${t.status}">${statusText}</span>
+    ${t.error ? `<div class="err">${esc(t.error)}</div>` : ""}
+    <dl><dt>${eth ? "Transaction" : "Transaction ID"}</dt><dd class="mono">${esc(t.txid.startsWith("not-sent") ? "Never sent: the simulation was refused" : t.txid)}</dd>
+    <dt>${eth ? "Contract call" : "Unlocked by"}</dt><dd>${esc(t.path)}</dd></dl>
+    ${t.script ? `<p class="small muted" style="margin:12px 0 4px">${eth ? "Rules checked" : "Script used"}</p><pre class="mono" style="background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:8px;white-space:pre-wrap;margin:0">${esc(t.script)}</pre>` : ""}
+    ${t.inputs && t.inputs.length ? `<p class="small muted" style="margin:14px 0 2px">${eth ? "From" : "Spends"}</p><table class="io">${ioRows(t.inputs)}</table>` : ""}
+    ${t.outputs && t.outputs.length ? `<p class="small muted" style="margin:14px 0 2px">${eth ? "Pays" : "Creates"}</p><table class="io">${ioRows(t.outputs)}</table>` : ""}`;
+}
+
+function renderStatic() {
+  const c = S.chain;
+  if (lastChain === c.id) return;
+  lastChain = c.id; selectedTx = null;
+  try { localStorage.setItem("ck-chain", c.id); } catch (e) {}
+  document.title = `Castlekeep: ${c.name}`;
+  $("mineBtns").innerHTML = c.mineButtons.map((b, i) => `<button class="btn" data-mi="${i}" ${b.title ? `title="${esc(b.title)}"` : ""}>${esc(b.label)}</button>`).join("");
+  $("mineBtns").querySelectorAll("button").forEach(b => b.onclick = () => { const m = c.mineButtons[+b.dataset.mi]; act({action: "mine", n: m.n || 0, secs: m.secs || 0}); });
+  $("recipes").innerHTML = recipes(c).map(([h, p]) => `<div><h4>${esc(h)}</h4><p>${esc(p)}</p></div>`).join("");
+  $("faucet").textContent = `Get 1 test ${c.ticker}`;
+  $("lock").textContent = `Lock ${c.ticker}`;
+  $("lockAmt").value = c.defaultLock; $("orderAmt").value = c.defaultOrder;
+  $("orderUnit").textContent = c.ticker;
+  $("swapUnit").textContent = c.ticker; $("swapFrom").textContent = c.ticker;
+  $("priceLabel").textContent = `${c.ticker} price (USD)`;
+  const step = S.price >= 10000 ? 1000 : S.price >= 1000 ? 100 : 10;
+  $("priceSteps").innerHTML = `<button class="btn" style="flex:1" data-ps="-${step}">−$${step.toLocaleString("en-US")}</button><button class="btn" style="flex:1" data-ps="${step}">+$${step.toLocaleString("en-US")}</button>`;
+  $("priceSteps").querySelectorAll("button").forEach(b => b.onclick = () => act({action: "price", usd: S.price + +b.dataset.ps}));
+  $("orderHint").textContent = c.id === "eth"
+    ? "You sign the new vault state with the order and the exchange signs it on the fill. A newer state always beats an older one."
+    : "You sign the new vault state before the order is sent, so a filled trade can't be undone.";
+  $("cashHint").textContent = `One cash balance for your whole account: money from selling one coin can be spent on another. The exchange holds this cash like any normal account; only the coins are self-custodied.`;
+  $("addCash").hidden = !c.testCash;
+  document.querySelector('[data-side="buy"]').textContent = c.dualFund ? "Buy" : "Buy back";
+  $("model").innerHTML = `<b>${esc(c.name)}:</b> ${esc(c.model)}`;
+  $("log").dataset.key = "";
+}
+
+function render() {
+  if (!S) return;
+  renderTabs();
+  const c = S.chain;
+  const showApp = S.available && S.ready && !S.initErr;
+  $("app").hidden = !showApp;
+  $("overlay").hidden = showApp;
+  if (!S.available) {
+    $("model").innerHTML = `<b>${esc(c.name)}:</b> ${esc(c.model)}`;
+    $("mineBtns").innerHTML = ""; $("height").textContent = "–"; $("mempool").textContent = "Not installed"; lastChain = null;
+    $("overlayBox").innerHTML = `<div class="missing-box"><h2>${esc(c.name)} isn't set up yet</h2>
+      <p class="muted">Castlekeep needs a local ${esc(c.name)} test node. Install it, then restart Castlekeep.</p>
+      <pre class="mono">${esc(S.unavailable)}</pre><p class="small muted">The other chains keep working in the meantime. See the README for step-by-step instructions.</p></div>`;
+    return;
+  }
+  if (!showApp) {
+    $("model").innerHTML = `<b>${esc(c.name)}:</b> ${esc(c.model)}`;
+    $("mineBtns").innerHTML = ""; lastChain = null;
+    $("overlayBox").innerHTML = `<h2>Starting your private ${esc(c.name)} test chain</h2>
+      <p class="muted">${esc(S.initErr ? "Couldn't start: " + S.initErr : S.progress)}</p>
+      ${S.initErr ? "" : `<div class="loading"><i></i></div>`}
+      <p class="small muted" style="margin-top:18px">Everything runs on this computer. The coins are test coins with no value.</p>`;
+    return;
+  }
+  renderStatic();
+  $("height").textContent = "Block " + S.height.toLocaleString("en-US");
+  $("mempool").textContent = (S.chainTime ? S.chainTime + ". " : "") + (S.mempool ? `${S.mempool} waiting for a block` : "Nothing waiting for a block");
+  $("wallet").textContent = coin(S.walletSats);
+  $("walletPending").textContent = S.walletPending ? `Plus ${coin(S.walletPending)} waiting for a block` : (c.id === "eth" ? "Gas fees come out of this, as on the real network." : "");
+  $("cash").textContent = usd(S.cashCents / 100);
+  $("price").textContent = usd(S.price);
+  $("exchWallet").textContent = (S.exchWalletSats > 0 ? "+" : S.exchWalletSats < 0 ? "−" : "") + coin(Math.abs(S.exchWalletSats));
+  document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === S.mode)));
+  $("modeDesc").textContent = modeText[S.mode];
+  $("wtBox").hidden = !S.hasUserWatchtower;
+  $("wt").checked = !!S.watchtower;
+  $("wtHint").textContent = c.id === "eth"
+    ? "It watches exits for you and submits your newest signed state if an older one shows up."
+    : "It watches the chain during an exit. If the exchange publishes a state you hold the revocation secret for, it uses the secret to take the exchange's share. If your latest state pays you more than you put in, it publishes that state for you.";
+  const amt = parseFloat($("orderAmt").value) || 0;
+  $("orderEst").textContent = amt > 0 ? (side === "sell" ? `You'd receive about ${usd(amt * S.price)}.` : `That would cost about ${usd(amt * S.price)}.`) : "";
+  $("order").textContent = side === "sell" ? "Sign and sell" : (c.dualFund ? "Sign and buy" : "Sign and buy back");
+  if (!busy) {
+    const v = S.vault;
+    $("order").disabled = !(v && v.status === "open");
+    $("steal").disabled = !v || v.status === "closed" || v.status === "closing";
+    $("lock").disabled = !!(v && !v.closeTxid);
+  }
+  const v = S.vault;
+  $("lockHint").textContent = v && !v.closeTxid ? "Close your current vault first: settle it, or exit and claim."
+    : "Opens a vault that needs your key and the exchange's to move.";
+  renderSwap();
+  renderBook();
+  renderVault(); renderLog(); renderTxs();
+}
+
+// The order book panel: only the separate wallet program sends a book.
+let bside = "sell", lpChain = null;
+// Only replace a table when it changed, so a button under the mouse stays put.
+const setHTML = (id, h) => { const el = $(id); if (el.dataset.h !== h) { el.innerHTML = h; el.dataset.h = h; } };
+function renderBook() {
+  const b = S.book, c = S.chain;
+  $("bookPanel").hidden = !b;
+  $("who").textContent = S.who ? `${S.who}'s wallet` : "";
+  if (S.who) document.title = `Castlekeep: ${S.who}, ${c.name}`;
+  if (!b) return;
+  if (lpChain !== c.id) { lpChain = c.id; $("lpPrice").value = b.Price || S.price; $("lpUnit").textContent = c.ticker; }
+  const asks = (b.Asks || []).slice().reverse(), bids = b.Bids || [];
+  const row = (cls, l) => `<tr class="${cls}"><td>${usd(l.Price)}</td><td class="r">${esc(coin(l.Sats, 6))}</td><td class="r">${usd(l.Price * l.Sats / 1e8)}</td></tr>`;
+  setHTML("bookTable", `<tr><th>Price</th><th class="r">Amount</th><th class="r">Total</th></tr>` +
+    (asks.length ? asks.map(l => row("ask", l)).join("") : `<tr><td colspan="3" class="muted small">No sell orders</td></tr>`) +
+    `<tr class="mid"><td colspan="3">Last price ${usd(b.Price)}</td></tr>` +
+    (bids.length ? bids.map(l => row("bid", l)).join("") : `<tr><td colspan="3" class="muted small">No buy orders</td></tr>`));
+  const mine = (b.Mine || []).slice().reverse();
+  setHTML("myOrders", mine.length
+    ? `<tr><th>#</th><th>Side</th><th class="r">Price</th><th class="r">Filled</th><th></th></tr>` + mine.map(o =>
+      `<tr><td>${o.ID}</td><td>${esc(o.Side)}</td><td class="r">${usd(o.Price)}</td><td class="r">${esc(coin(o.Sats - o.Left, 6))} of ${esc(coin(o.Sats, 6))}</td>
+       <td class="r">${o.Status === "open" ? `<button class="btn" data-cancel="${o.ID}">Cancel</button>` : `<span class="muted small">${esc(o.Status)}</span>`}</td></tr>`).join("")
+    : `<tr><td class="muted small">No orders yet on ${esc(c.ticker)}.</td></tr>`);
+  const tr = (b.Trades || []).slice().reverse().slice(0, 12);
+  setHTML("trades", tr.length
+    ? `<tr><th>Time</th><th class="r">Price</th><th class="r">Amount</th></tr>` + tr.map(t => `<tr><td>${esc(t.Time)}</td><td class="r">${usd(t.Price)}</td><td class="r">${esc(coin(t.Sats, 6))}</td></tr>`).join("")
+    : `<tr><td class="muted small">No trades yet.</td></tr>`);
+  const p = parseFloat($("lpPrice").value) || 0, a = parseFloat($("lpAmt").value) || 0;
+  $("lpEst").textContent = p > 0 && a > 0 ? (bside === "sell" ? `You'd receive ${usd(p * a)} if it all fills.` : `It would cost up to ${usd(p * a)} of cash.`) : "";
+  $("lpBtn").textContent = bside === "sell" ? `Place sell order` : `Place buy order`;
+  if (!busy) $("lpBtn").disabled = !(S.vault && S.vault.status === "open");
+}
+document.querySelectorAll("[data-bside]").forEach(b => b.onclick = () => {
+  bside = b.dataset.bside;
+  document.querySelectorAll("[data-bside]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  if (S && S.ready) renderBook();
+});
+$("lpPrice").oninput = $("lpAmt").oninput = () => { if (S && S.ready) renderBook(); };
+$("lpBtn").onclick = () => act({action: "place", side: bside, usd: parseInt($("lpPrice").value, 10) || 0, sats: Math.round((parseFloat($("lpAmt").value) || 0) * 1e8)});
+$("myOrders").addEventListener("click", e => { const b = e.target.closest("[data-cancel]"); if (b) act({action: "cancel", id: +b.dataset.cancel}); });
+
+$("tabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-chain]");
+  if (!b || b.dataset.chain === cur) return;
+  cur = b.dataset.chain; S = null; lastChain = null; renderTabs();
+  fetch("/api/state?chain=" + cur).then(r => r.json()).then(s => { if (s.chain.id === cur) { S = s; render(); } });
+});
+$("setPrice").onclick = () => { const v = parseInt($("priceInput").value, 10); if (v) act({action: "price", usd: v}); };
+$("priceInput").onkeydown = e => { if (e.key === "Enter") $("setPrice").click(); };
+$("faucet").onclick = () => act({action: "faucet"});
+$("addCash").onclick = () => act({action: "cash"});
+$("lock").onclick = () => act({action: "lock", sats: Math.round((parseFloat($("lockAmt").value) || 0) * 1e8)});
+$("order").onclick = () => act({action: "order", side, sats: Math.round((parseFloat($("orderAmt").value) || 0) * 1e8)});
+$("orderAmt").oninput = render;
+$("swap").onclick = () => act({action: "swap", to: $("swapTo").value, sats: Math.round((parseFloat($("swapAmt").value) || 0) * 1e8)});
+$("swapAmt").oninput = () => { if (S && S.ready) renderSwap(); };
+$("swapTo").onchange = () => { if (S && S.ready) renderSwap(); };
+$("steal").onclick = () => act({action: "steal"});
+$("wt").onchange = e => act({action: "watchtower", on: e.target.checked});
+document.querySelectorAll("[data-side]").forEach(b => b.onclick = () => {
+  side = b.dataset.side;
+  document.querySelectorAll("[data-side]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  render();
+});
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => act({action: "mode", mode: b.dataset.mode}));
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tx]");
+  if (!t) return;
+  selectedTx = t.dataset.tx; renderTxs();
+  if (t.classList.contains("link")) document.querySelector(".insp").scrollIntoView({behavior: "smooth", block: "start"});
+});
+pollChains().then(poll); pollAccount();
+
+</script>
+</body>
+</html>
