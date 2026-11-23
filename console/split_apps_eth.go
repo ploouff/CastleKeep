@@ -117,7 +117,10 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 	case "steal":
 		err = userErr("In the separate programs the exchange's keys live in the exchange server, so the wallet can't make it try. The one-program console has this demo.")
 	default:
-		err = userErr("Unknown action.")
+		var handled bool
+		if ok, err, handled = w.bookAction("eth", e.info.Ticker, r); !handled {
+			err = userErr("Unknown action.")
+		}
 	}
 	h := e.w.eth.c.height()
 	if err != nil {
@@ -142,6 +145,7 @@ func (e *walletEthEngine) Snapshot() Snapshot {
 	if call(e.exch, "/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
 		s.CashCents = cr.CashCents
 	}
+	s.Who, s.Book = e.w.Name, e.w.bookSnapshot("eth")
 	e.w.mu.Lock()
 	defer e.w.mu.Unlock()
 	we := e.w.eth

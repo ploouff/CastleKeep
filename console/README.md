@@ -161,6 +161,33 @@ The price of what you buy comes out of your cash as soon as the exchange signs i
 balance can dip below zero for that moment), and the money from the sale goes back in once
 your wallet signs the selling side, so a completed swap leaves your cash unchanged.
 
+### Order book (several wallets)
+
+Run more than one wallet against the same exchange, each with a name and its own port,
+each in its own window:
+
+```
+go run . wallet -name alice
+go run . wallet -name bob -port 9301
+```
+
+Each wallet page then has an **Order book** panel under the Exchange panel: the open sell
+orders (asks) and buy orders (bids) from every wallet, your own orders with a Cancel
+button, recent trades, and a form for a limit order (side, price per coin, amount).
+
+- Orders match best price first, then oldest first. The trade happens at the price of the
+  order that was already waiting, and that price becomes the coin's price.
+- The exchange sits in the middle of every trade. When Alice sells to Bob, Alice's vault
+  gets a new state that moves the coins to the exchange's side (her cash goes up), and
+  Bob's vault gets one that moves the same amount from the exchange's side to his (his
+  cash goes down). So to buy, your vault needs buying capacity from the exchange.
+- While an order is open, the coins, buying capacity and cash it would use are set aside.
+- Each wallet signs its own side of a fill, and only if it matches an order it placed:
+  same coin and side, no more than is left, at its price or better. A resting order is
+  signed by the wallet's background check within a couple of seconds.
+
+The admin page shows every open order, by account, and the recent trades.
+
 Not in the separate programs: the "Have the exchange try to steal" demo (the exchange's keys aren't in your wallet to try it with). Ctrl+C in the chains window
 stops the test nodes.
 

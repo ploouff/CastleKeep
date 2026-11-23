@@ -116,7 +116,8 @@ This is a proof of concept, not a product.
   watching, the old state stands. The Ethereum version uses state numbers instead.
 - **Spot trading only.** There's no leverage, because losses must never exceed what's locked.
 - **Only the coins are self-custodied.** The shared cash balance sits with the exchange as normal.
-- **Flat fees**, no fee bumping, no real order book.
+- **Flat fees**, no fee bumping. The order book between users exists only in the separate
+  programs, keeps orders in memory, and has no trading fee.
 
 ## Roadmap
 
@@ -126,6 +127,8 @@ This is a proof of concept, not a product.
 - [x] Revocation penalties on Bitcoin and Litecoin (test chains)
 - [x] One test account across all chains, and coin-to-coin swaps
 - [x] Two-way revocation and exchange-funded buying on Bitcoin and Litecoin
+- [x] Separate exchange and wallet programs
+- [x] Order book between several users (separate programs)
 - [ ] Compile and test the Solana program
 - [ ] Deploy the Ethereum contract to EVM networks (Polygon, Arbitrum, Base)
 - [ ] Run on signet, Bitcoin's public test network

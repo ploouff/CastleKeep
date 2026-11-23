@@ -52,6 +52,7 @@ type xVault struct {
 }
 
 type xPending struct {
+	done      func() // run once the wallet's signature arrives (order book fills)
 	kind      string // "order" or "splice"
 	side      string
 	sats      int64
@@ -72,6 +73,8 @@ type Exchange struct {
 	tamper    bool             // tests only: corrupt the next signature sent to the wallet
 	eth       *xEth
 	ethVaults map[string]*xEthVault
+	books     map[string]*book
+	orderSeq  int
 }
 
 // NewExchange connects to each chain's node. rpc maps chain id to the
@@ -121,6 +124,10 @@ func (x *Exchange) Handler() http.Handler {
 	m.Handle("/v1/eth/capacity/offer", handle(x.ethCapacityOffer))
 	m.Handle("/v1/eth/settle", handle(x.ethSettle))
 	m.Handle("/v1/swap", handle(x.swap))
+	m.Handle("/v1/book/place", handle(x.place))
+	m.Handle("/v1/book/cancel", handle(x.cancel))
+	m.Handle("/v1/book", handle(x.bookView))
+	m.Handle("/v1/fills/next", handle(x.nextFill))
 	m.Handle("/v1/info", handle(x.info))
 	m.Handle("/v1/state", handle(x.state))
 	m.Handle("/v1/tick", handle(func(empty) (empty, error) { x.Tick(); return empty{}, nil }))
@@ -311,7 +318,7 @@ func (x *Exchange) commit(r CommitReq) (CommitResp, error) {
 	if !secretMatches(r.USecretPrev, prev.uHash) {
 		return CommitResp{}, userErr("That isn't your secret for state #%d.", prev.Index)
 	}
-	if p.side == "buy" {
+	if p.side == "buy" || p.side == "fill-buy" {
 		if p.cost > x.cash[v.account] {
 			return CommitResp{}, userErr("Not enough cash any more.")
 		}
@@ -323,6 +330,9 @@ func (x *Exchange) commit(r CommitReq) (CommitResp, error) {
 	prev.uSecret, prev.revoked = r.USecretPrev, true
 	v.states = append(v.states, p.st)
 	v.pend = nil
+	if p.done != nil {
+		p.done()
+	}
 	v.log("State #%d signed: %s", p.st.Index, p.st.Label)
 	return CommitResp{RSecretPrev: prev.rSecret, CashCents: x.cash[v.account]}, nil
 }

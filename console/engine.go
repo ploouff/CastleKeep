@@ -47,6 +47,7 @@ type ActionReq struct {
 	By     string `json:"by"`
 	On     bool   `json:"on"`
 	To     string `json:"to"` // swap: the chain whose coin you buy
+	ID     int    `json:"id"` // order book: the order to cancel
 }
 
 type Event struct {
@@ -145,6 +146,8 @@ type Snapshot struct {
 	Vault       *VaultView `json:"vault"`
 	Events      []Event    `json:"events"`
 	Txs         []*TxInfo  `json:"txs"`
+	Who         string     `json:"who,omitempty"`  // separate programs: the wallet's name
+	Book        *BookResp  `json:"book,omitempty"` // separate programs: this coin's order book
 }
 
 type Engine interface {

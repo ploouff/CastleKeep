@@ -89,6 +89,7 @@ type xEthVault struct {
 }
 
 type xEthPend struct {
+	done func() // run once the wallet's signature arrives (order book fills)
 	kind string // "open", "order", "fund"
 	side string
 	cost int64
@@ -243,7 +244,7 @@ func (x *Exchange) ethCommit(r EthCommitReq) (EthCommitResp, error) {
 		return EthCommitResp{}, userErr("Your signature on the new state doesn't check out.")
 	}
 	if p.kind == "order" {
-		if p.side == "buy" {
+		if p.side == "buy" || p.side == "fill-buy" {
 			if p.cost > x.cash[v.account] {
 				return EthCommitResp{}, userErr("Not enough cash any more.")
 			}
@@ -256,6 +257,9 @@ func (x *Exchange) ethCommit(r EthCommitReq) (EthCommitResp, error) {
 	p.st.exchSig = signDigest(x.eth.key, d)
 	v.states = append(v.states, p.st)
 	v.pend = nil
+	if p.done != nil {
+		p.done()
+	}
 	v.log("State #%d signed: %s", p.st.Index, p.st.Label)
 	return EthCommitResp{x.maybeTamper(p.st.exchSig), x.cash[v.account]}, nil
 }
@@ -498,6 +502,12 @@ func (w *Wallet) ethAgree(we *wEth, v *wEthVault, off EthStateOffer, wantUser, t
 func (w *Wallet) ethRegister(we *wEth, v *wEthVault) {
 	if len(v.states) > 0 || we.c.receipt(v.openTx) != 1 {
 		return
+	}
+	// The vault number guessed before sending can be taken by someone else's
+	// deposit in the same block; the Opened event says which one is ours.
+	if id := we.c.openedID(v.openTx); id != nil && id.Cmp(v.id) != 0 {
+		v.log("Your vault is #%s", id)
+		v.id = id
 	}
 	cv, err := we.c.readVaultID(v.id)
 	if err != nil || !strings.EqualFold(cv.user, we.addr) {

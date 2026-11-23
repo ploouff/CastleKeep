@@ -1188,3 +1188,27 @@ func (e *EthEngine) submitCall(id *big.Int, nonce, userUnits int64, userSig, exc
 	return calldata("submitState(uint256,uint64,uint256,(uint8,bytes32,bytes32),(uint8,bytes32,bytes32))",
 		wordInt(id), wordU(nonce), wordInt(toWei(userUnits)), sigWords(userSig), sigWords(exchSig))
 }
+
+// openedID reads the vault number from the Opened event in an open() receipt.
+func (e *EthEngine) openedID(txHash string) *big.Int {
+	r, err := e.call("eth_getTransactionReceipt", txHash)
+	if err != nil {
+		return nil
+	}
+	var rc struct {
+		Logs []struct {
+			Address string   `json:"address"`
+			Topics  []string `json:"topics"`
+		} `json:"logs"`
+	}
+	if json.Unmarshal(r, &rc) != nil {
+		return nil
+	}
+	topic := "0x" + hex.EncodeToString(keccak([]byte("Opened(uint256,address,address,uint256,uint64)")))
+	for _, l := range rc.Logs {
+		if strings.EqualFold(l.Address, e.contract) && len(l.Topics) > 1 && strings.EqualFold(l.Topics[0], topic) {
+			return hexBig(l.Topics[1])
+		}
+	}
+	return nil
+}

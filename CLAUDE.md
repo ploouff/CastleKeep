@@ -28,6 +28,8 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | `console/split_apps.go` | The `chains`, `exchange`, `wallet` subcommands; `walletEngine` adapts the wallet to the page's `Engine` API. |
 | `console/split_eth.go`, `split_apps_eth.go`, `split_eth_test.go` | Ethereum in the separate programs, and its tests. |
 | `console/split_swap.go`, `split_swap_test.go` | Swaps across the three chains in the separate programs. |
+| `console/split_book.go`, `split_book_test.go` | Order book (separate programs): limit orders, matching (best price, then oldest), reservations, fills each wallet checks against its own order before signing. Page: the "Order book" panel in `index.html` (only shown when the snapshot has `book`), actions `place`/`cancel` via `bookAction`; several wallets with `go run . wallet -name bob -port 9301`. |
+| `TESTING.md` | How to run the tests and try each feature by hand. |
 | `prototype/` | Original Bitcoin CLI demo (separate Go module). |
 | `solana/` | Untested Anchor design. Not compiled. |
 

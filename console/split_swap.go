@@ -63,7 +63,9 @@ func (x *Exchange) priceOf(chain string) (int64, string, error) {
 
 // swapLeg prepares one side of a swap and its pending record (x.mu held).
 // The record is only stored once both sides are ready.
-func (x *Exchange) swapLeg(l SwapLeg, account, side string, sats, cost int64, label string) (SwapOfferLeg, func(), error) {
+// pendSide is how the commit treats cash ("swap-buy", "fill-sell", ...); done runs
+// after the wallet signs.
+func (x *Exchange) swapLeg(l SwapLeg, account, side string, sats, cost int64, label, pendSide string, done func()) (SwapOfferLeg, func(), error) {
 	if l.Chain == "eth" {
 		v, err := x.ethVault(l.VaultID)
 		if err != nil {
@@ -90,7 +92,7 @@ func (x *Exchange) swapLeg(l SwapLeg, account, side string, sats, cost int64, la
 		if side == "buy" {
 			off.EthExchSig = x.maybeTamper(signDigest(x.eth.key, x.eth.c.stateDigest(v.id, int64(st.Index), user)))
 		}
-		return off, func() { v.pend = &xEthPend{kind: "order", side: "swap-" + side, cost: cost, st: st} }, nil
+		return off, func() { v.pend = &xEthPend{kind: "order", side: pendSide, cost: cost, st: st, done: done} }, nil
 	}
 	v, xc, err := x.vault(l.VaultID)
 	if err != nil {
@@ -129,7 +131,7 @@ func (x *Exchange) swapLeg(l SwapLeg, account, side string, sats, cost int64, la
 		sig = x.maybeTamper(sig)
 	}
 	off := SwapOfferLeg{UTXO: &StateOffer{Index: st.Index, Label: label, UserSats: user, ExchSats: exch, RHash: rh, ExchSigU: sig}}
-	return off, func() { v.pend = &xPending{kind: "order", side: "swap-" + side, cost: cost, st: st} }, nil
+	return off, func() { v.pend = &xPending{kind: "order", side: pendSide, cost: cost, st: st, done: done} }, nil
 }
 
 func (x *Exchange) swap(r SwapReq) (SwapResp, error) {
@@ -157,11 +159,11 @@ func (x *Exchange) swap(r SwapReq) (SwapResp, error) {
 	cost := orderCost(got, pt)
 	sellLabel := fmt.Sprintf("Swapped %s for %s (sold at %s)", fmtCoin(r.Sats, tf), fmtCoin(got, tt), fmtUSD(pf*100))
 	buyLabel := fmt.Sprintf("Swapped %s for %s (bought at %s)", fmtCoin(r.Sats, tf), fmtCoin(got, tt), fmtUSD(pt*100))
-	buy, setBuy, err := x.swapLeg(r.To, r.Account, "buy", got, 0, buyLabel)
+	buy, setBuy, err := x.swapLeg(r.To, r.Account, "buy", got, 0, buyLabel, "swap-buy", nil)
 	if err != nil {
 		return SwapResp{}, userErr("Can't buy %s: %s", fmtCoin(got, tt), strings.TrimSuffix(err.Error(), "."))
 	}
-	sell, setSell, err := x.swapLeg(r.From, r.Account, "sell", r.Sats, proceeds, sellLabel)
+	sell, setSell, err := x.swapLeg(r.From, r.Account, "sell", r.Sats, proceeds, sellLabel, "swap-sell", nil)
 	if err != nil {
 		return SwapResp{}, err
 	}

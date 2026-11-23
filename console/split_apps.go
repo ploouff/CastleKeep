@@ -199,6 +199,7 @@ type XChainView struct {
 type XStateResp struct {
 	Chains []XChainView
 	Vaults []XVaultView
+	Books  []XBookView
 }
 
 func (x *Exchange) info(r InfoReq) (InfoResp, error) {
@@ -240,6 +241,7 @@ func (x *Exchange) state(empty) (XStateResp, error) {
 		out.Vaults = append(out.Vaults, XVaultView{v.id, v.account, v.chain, st, l.UserSats, l.ExchSats, len(v.states), v.events})
 	}
 	x.ethAdminView(&out)
+	x.bookAdminView(&out)
 	sort.Slice(out.Vaults, func(i, j int) bool { return out.Vaults[i].ID < out.Vaults[j].ID })
 	return out, nil
 }
@@ -306,6 +308,7 @@ func runWallet(args []string) {
 	chains := fs.String("chains", "http://127.0.0.1:9100", "the chains service")
 	exch := fs.String("exchange", "http://127.0.0.1:9200", "the exchange server")
 	noBrowser := fs.Bool("no-browser", false, "don't open the browser automatically")
+	name := fs.String("name", "", "a name for this wallet, e.g. alice (run a second wallet with -name bob -port 9301)")
 	fs.Parse(args)
 
 	rpc, ep := waitChains(*chains)
@@ -315,6 +318,7 @@ func runWallet(args []string) {
 		fmt.Println("Couldn't connect to the test nodes:", err)
 		os.Exit(1)
 	}
+	w.SetName(*name)
 	var engines []Engine
 	for _, id := range []string{"btc", "ltc"} {
 		we := &walletEngine{w: w, id: id, info: cfgs[id].Info, chains: *chains, exch: *exch}
@@ -358,6 +362,9 @@ func runWallet(args []string) {
 	}
 	ln, url := listen(*port)
 	fmt.Println("Castlekeep wallet (test networks only)")
+	if *name != "" {
+		fmt.Println("Wallet name:", *name)
+	}
 	fmt.Println("It holds only your keys. Exchange server:", *exch)
 	fmt.Println("Open:", url)
 	if !*noBrowser {
@@ -444,7 +451,10 @@ func (e *walletEngine) Do(r ActionReq) error {
 	case "steal":
 		err = userErr("In the separate programs the exchange's keys live in the exchange server, so the wallet can't make it try. The one-program console has this demo.")
 	default:
-		err = userErr("Unknown action.")
+		var handled bool
+		if ok, err, handled = w.bookAction(e.id, e.info.Ticker, r); !handled {
+			err = userErr("Unknown action.")
+		}
 	}
 	h := e.height()
 	if err != nil {
@@ -475,6 +485,7 @@ func (e *walletEngine) Snapshot() Snapshot {
 	if call(e.exch, "/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
 		s.CashCents = cr.CashCents
 	}
+	s.Who, s.Book = e.w.Name, e.w.bookSnapshot(e.id)
 	e.w.mu.Lock()
 	defer e.w.mu.Unlock()
 	wc := e.w.chains[e.id]

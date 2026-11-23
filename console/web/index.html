@@ -107,6 +107,17 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 .seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
 .mode-desc{font-size:13px;color:var(--steel);margin:7px 0 0;min-height:2.6em}
 
+/* order book (separate programs only) */
+.bookp{margin:0 28px 22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(260px,320px);gap:22px}
+.bookp h3{font:600 16px var(--display);margin:0 0 6px}
+.bt{width:100%;border-collapse:collapse;font-size:14px}
+.bt th{font-weight:500;color:var(--steel);text-align:left;font-size:12.5px;padding:4px 6px;border-bottom:1px solid var(--rule)}
+.bt td{padding:5px 6px;border-bottom:1px solid var(--rule-soft)}
+.bt td.r,.bt th.r{text-align:right}
+.bt tr.ask td:first-child{color:var(--red)} .bt tr.bid td:first-child{color:var(--pine)}
+.bt tr.mid td{background:#fff;font-weight:600;text-align:center}
+@media (max-width:1100px){.bookp{grid-template-columns:1fr}}
+
 /* bottom */
 .lower{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:22px;padding:0 28px 40px}
 .log{list-style:none;margin:0;padding:0;max-height:560px;overflow:auto}
@@ -202,7 +213,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
 <body>
 <header>
   <div class="brand">
-    <h1>Castlekeep</h1>
+    <h1>Castlekeep <span id="who" style="font-size:.6em;color:var(--steel);font-weight:500"></span></h1>
     <p>Trade from a vault the exchange can't empty. Running on private test chains.</p>
   </div>
   <div class="chain">
@@ -298,6 +309,34 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <p class="small muted" style="margin:0">Exchange wallet change since the start: <span class="num" id="exchWallet">0</span></p>
   </section>
 </main>
+
+<section class="panel bookp" id="bookPanel" aria-labelledby="b-h" hidden>
+  <div>
+    <h2 id="b-h">Order book</h2>
+    <p class="sub">Every wallet using this exchange. Sells (asks) on top, buys (bids) below.</p>
+    <table class="bt" id="bookTable"></table>
+  </div>
+  <div>
+    <h3>Your orders</h3>
+    <table class="bt" id="myOrders"></table>
+    <h3 style="margin-top:18px">Recent trades</h3>
+    <table class="bt" id="trades"></table>
+  </div>
+  <div>
+    <h3>Place a limit order</h3>
+    <div class="seg" role="group" aria-label="Limit order side">
+      <button aria-pressed="true" data-bside="sell">Sell</button>
+      <button aria-pressed="false" data-bside="buy">Buy</button>
+    </div>
+    <label for="lpPrice" style="margin-top:10px;display:block">Price per coin (USD)</label>
+    <div class="field"><input id="lpPrice" type="number" min="1" step="1" inputmode="numeric"></div>
+    <label for="lpAmt" style="margin-top:8px;display:block">Amount</label>
+    <div class="field"><input id="lpAmt" type="number" min="0" step="0.01" value="0.1" inputmode="decimal"><span class="muted" style="align-self:center" id="lpUnit"></span></div>
+    <p class="hint" id="lpEst"></p>
+    <button class="btn primary block" id="lpBtn" style="margin-top:8px">Place order</button>
+    <p class="hint" id="lpHint">It matches the best opposite order first, at that order's price. Until it fills, the coins (or cash) it needs are set aside. Your wallet signs each fill only after checking it against this order: same coin and side, not more than you asked for, at your price or better.</p>
+  </div>
+</section>
 
 <div class="lower">
   <section class="panel" aria-labelledby="a-h">
@@ -738,8 +777,50 @@ function render() {
   $("lockHint").textContent = v && !v.closeTxid ? "Close your current vault first: settle it, or exit and claim."
     : "Opens a vault that needs your key and the exchange's to move.";
   renderSwap();
+  renderBook();
   renderVault(); renderLog(); renderTxs();
 }
+
+// The order book panel: only the separate wallet program sends a book.
+let bside = "sell", lpChain = null;
+// Only replace a table when it changed, so a button under the mouse stays put.
+const setHTML = (id, h) => { const el = $(id); if (el.dataset.h !== h) { el.innerHTML = h; el.dataset.h = h; } };
+function renderBook() {
+  const b = S.book, c = S.chain;
+  $("bookPanel").hidden = !b;
+  $("who").textContent = S.who ? `${S.who}'s wallet` : "";
+  if (S.who) document.title = `Castlekeep: ${S.who}, ${c.name}`;
+  if (!b) return;
+  if (lpChain !== c.id) { lpChain = c.id; $("lpPrice").value = b.Price || S.price; $("lpUnit").textContent = c.ticker; }
+  const asks = (b.Asks || []).slice().reverse(), bids = b.Bids || [];
+  const row = (cls, l) => `<tr class="${cls}"><td>${usd(l.Price)}</td><td class="r">${esc(coin(l.Sats, 6))}</td><td class="r">${usd(l.Price * l.Sats / 1e8)}</td></tr>`;
+  setHTML("bookTable", `<tr><th>Price</th><th class="r">Amount</th><th class="r">Total</th></tr>` +
+    (asks.length ? asks.map(l => row("ask", l)).join("") : `<tr><td colspan="3" class="muted small">No sell orders</td></tr>`) +
+    `<tr class="mid"><td colspan="3">Last price ${usd(b.Price)}</td></tr>` +
+    (bids.length ? bids.map(l => row("bid", l)).join("") : `<tr><td colspan="3" class="muted small">No buy orders</td></tr>`));
+  const mine = (b.Mine || []).slice().reverse();
+  setHTML("myOrders", mine.length
+    ? `<tr><th>#</th><th>Side</th><th class="r">Price</th><th class="r">Filled</th><th></th></tr>` + mine.map(o =>
+      `<tr><td>${o.ID}</td><td>${esc(o.Side)}</td><td class="r">${usd(o.Price)}</td><td class="r">${esc(coin(o.Sats - o.Left, 6))} of ${esc(coin(o.Sats, 6))}</td>
+       <td class="r">${o.Status === "open" ? `<button class="btn" data-cancel="${o.ID}">Cancel</button>` : `<span class="muted small">${esc(o.Status)}</span>`}</td></tr>`).join("")
+    : `<tr><td class="muted small">No orders yet on ${esc(c.ticker)}.</td></tr>`);
+  const tr = (b.Trades || []).slice().reverse().slice(0, 12);
+  setHTML("trades", tr.length
+    ? `<tr><th>Time</th><th class="r">Price</th><th class="r">Amount</th></tr>` + tr.map(t => `<tr><td>${esc(t.Time)}</td><td class="r">${usd(t.Price)}</td><td class="r">${esc(coin(t.Sats, 6))}</td></tr>`).join("")
+    : `<tr><td class="muted small">No trades yet.</td></tr>`);
+  const p = parseFloat($("lpPrice").value) || 0, a = parseFloat($("lpAmt").value) || 0;
+  $("lpEst").textContent = p > 0 && a > 0 ? (bside === "sell" ? `You'd receive ${usd(p * a)} if it all fills.` : `It would cost up to ${usd(p * a)} of cash.`) : "";
+  $("lpBtn").textContent = bside === "sell" ? `Place sell order` : `Place buy order`;
+  if (!busy) $("lpBtn").disabled = !(S.vault && S.vault.status === "open");
+}
+document.querySelectorAll("[data-bside]").forEach(b => b.onclick = () => {
+  bside = b.dataset.bside;
+  document.querySelectorAll("[data-bside]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  if (S && S.ready) renderBook();
+});
+$("lpPrice").oninput = $("lpAmt").oninput = () => { if (S && S.ready) renderBook(); };
+$("lpBtn").onclick = () => act({action: "place", side: bside, usd: parseInt($("lpPrice").value, 10) || 0, sats: Math.round((parseFloat($("lpAmt").value) || 0) * 1e8)});
+$("myOrders").addEventListener("click", e => { const b = e.target.closest("[data-cancel]"); if (b) act({action: "cancel", id: +b.dataset.cancel}); });
 
 $("tabs").addEventListener("click", e => {
   const b = e.target.closest("[data-chain]");

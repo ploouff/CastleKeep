@@ -54,9 +54,11 @@ type Wallet struct {
 	mu      sync.Mutex
 	base    string // the exchange's address
 	Account string
-	WT      bool // the user's watchtower
+	Name    string // shown on the page; the account id starts with it
+	WT      bool   // the user's watchtower
 	chains  map[string]*wChain
 	eth     *wEth
+	orders  map[int]*wOrder
 }
 
 func NewWallet(exchangeURL string, cfgs map[string]UTXOConfig, rpc map[string]string) (*Wallet, error) {
@@ -491,6 +493,11 @@ func (w *Wallet) Tick() {
 		}
 	}
 	w.ethTick()
+	for _, c := range []string{"btc", "ltc", "eth"} {
+		if _, err := w.vaultID(c); err == nil {
+			w.signFills(c)
+		}
+	}
 }
 
 func (w *Wallet) watch(wc *wChain, v *wVault) {

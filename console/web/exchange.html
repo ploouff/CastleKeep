@@ -42,6 +42,10 @@ th{color:var(--steel);font-weight:600;font-size:13px}
     <p class="muted">Every vault a wallet has opened with this exchange, as the exchange sees it.</p>
     <table><thead><tr><th>Vault</th><th>Account</th><th>Chain</th><th>Status</th><th>User's side</th><th>Exchange's side</th><th>States</th><th>Latest events</th></tr></thead><tbody id="vaults"></tbody></table>
   </section>
+  <section class="panel"><h2>Order books</h2>
+    <p class="muted">Open limit orders from every wallet, and recent trades. The exchange sits in the middle of every trade: each side is a new state in that user's own vault, which their wallet signs.</p>
+    <div class="chains" id="books"></div>
+  </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -71,10 +75,21 @@ async function refresh() {
       </div>`).join("");
     $("vaults").innerHTML = (s.Vaults || []).map(v => {
       const t = v.Chain.toUpperCase();
-      return `<tr><td class="mono">${esc(v.ID.slice(0, 8))}</td><td class="mono">${esc(v.Account.slice(0, 8))}</td><td>${esc(t)}</td><td>${esc(v.Status)}</td>
+      return `<tr><td class="mono">${esc(v.ID.slice(0, 8))}</td><td class="mono">${esc(v.Account)}</td><td>${esc(t)}</td><td>${esc(v.Status)}</td>
         <td>${esc(coin(v.UserSats, t))}</td><td>${esc(coin(v.ExchSats, t))}</td><td>${v.States}</td>
         <td><ul class="ev">${(v.Events || []).slice(-3).map(e => `<li>${esc(e)}</li>`).join("")}</ul></td></tr>`;
     }).join("") || `<tr><td colspan="8" class="muted">No vaults yet. Open one from a wallet.</td></tr>`;
+    $("books").innerHTML = (s.Books || []).map(b => {
+      const t = b.Chain.toUpperCase();
+      const orders = (b.Orders || []).map(o => `<tr><td>${o.ID}</td><td class="mono">${esc(o.Account)}</td><td>${esc(o.Side)}</td><td>${usd(o.Price)}</td><td>${esc(coin(o.Left, ""))}of ${esc(coin(o.Sats, t))}</td></tr>`).join("")
+        || `<tr><td colspan="5" class="muted">No open orders.</td></tr>`;
+      const trades = (b.Trades || []).slice(-8).reverse().map(x => `<tr><td>${esc(x.Time)}</td><td>${usd(x.Price)}</td><td>${esc(coin(x.Sats, t))}</td></tr>`).join("")
+        || `<tr><td colspan="3" class="muted">No trades yet.</td></tr>`;
+      return `<div><div class="big">${esc(t)}</div>
+        ${b.Unsigned ? `<p class="muted">${b.Unsigned} fill(s) waiting for a wallet's signature.</p>` : ""}
+        <table><thead><tr><th>#</th><th>Account</th><th>Side</th><th>Price</th><th>Left</th></tr></thead><tbody>${orders}</tbody></table>
+        <table style="margin-top:10px"><thead><tr><th>Trade time</th><th>Price</th><th>Amount</th></tr></thead><tbody>${trades}</tbody></table></div>`;
+    }).join("") || `<p class="muted">No orders yet. Place one from a wallet page.</p>`;
   } catch (e) { $("err").textContent = "Lost contact with the exchange server: " + e.message; }
 }
 document.addEventListener("click", async e => {
