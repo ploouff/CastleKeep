@@ -22,8 +22,8 @@ func newBookEnv(t *testing.T, chain string) *bookEnv {
 	cfgs, rpc := map[string]UTXOConfig{}, map[string]string{}
 	var ue *UTXOEngine
 	var ee *EthEngine
-	if chain == "eth" {
-		ee = engine(t, "eth").(*EthEngine)
+	if isEVM(chain) {
+		ee = engine(t, e.chain).(*EthEngine)
 	} else {
 		ue = engine(t, chain).(*UTXOEngine)
 		cfgs[chain], rpc[chain] = ue.cfg, ue.RPCAddr()
@@ -34,7 +34,7 @@ func newBookEnv(t *testing.T, chain string) *bookEnv {
 	}
 	var xa string
 	if ee != nil {
-		xa = x.AttachEth(ee.Endpoint(), ee.cfg.DefaultPrice)
+		xa = x.AttachEVM(e.chain, ee.Endpoint(), ee.cfg.DefaultPrice)
 	}
 	srv := httptest.NewServer(x.Handler())
 	t.Cleanup(srv.Close)
@@ -47,7 +47,7 @@ func newBookEnv(t *testing.T, chain string) *bookEnv {
 		*w = nw
 	}
 	if ee != nil {
-		for _, a := range []string{xa, e.alice.AttachEth(ee.Endpoint()), e.bob.AttachEth(ee.Endpoint())} {
+		for _, a := range []string{xa, e.alice.AttachEVM(e.chain, ee.Endpoint()), e.bob.AttachEVM(e.chain, ee.Endpoint())} {
 			if err := ee.FundAddress(a, 5*unit); err != nil {
 				t.Fatal(err)
 			}
@@ -95,8 +95,8 @@ func (e *bookEnv) refused(err error, contains string) {
 
 func (e *bookEnv) open(w *Wallet) {
 	e.t.Helper()
-	if e.chain == "eth" {
-		e.ok(w.EthOpen(oneCoin))
+	if isEVM(e.chain) {
+		e.ok(w.EthOpen(e.chain, oneCoin))
 	} else {
 		e.ok(w.Open(e.chain, oneCoin))
 	}
@@ -104,16 +104,16 @@ func (e *bookEnv) open(w *Wallet) {
 
 func (e *bookEnv) capacity(w *Wallet) {
 	e.t.Helper()
-	if e.chain == "eth" {
-		e.ok(w.EthCapacity(oneCoin))
+	if isEVM(e.chain) {
+		e.ok(w.EthCapacity(e.chain, oneCoin))
 	} else {
 		e.ok(w.Capacity(e.chain, oneCoin))
 	}
 }
 
 func (e *bookEnv) share(w *Wallet) int64 {
-	if e.chain == "eth" {
-		u, _, _, _ := w.EthVault()
+	if isEVM(e.chain) {
+		u, _, _, _ := w.EthVault(e.chain)
 		return u
 	}
 	u, _, _, _, _ := w.Vault(e.chain)
@@ -138,6 +138,7 @@ func (e *bookEnv) cash(w *Wallet, cents int64) {
 func TestBookBitcoin(t *testing.T)  { runBook(t, "btc") }
 func TestBookLitecoin(t *testing.T) { runBook(t, "ltc") }
 func TestBookEthereum(t *testing.T) { runBook(t, "eth") }
+func TestBookPolygon(t *testing.T)  { runBook(t, "pol") }
 
 func runBook(t *testing.T, chain string) {
 	e := newBookEnv(t, chain)

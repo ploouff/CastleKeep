@@ -30,9 +30,13 @@ type ChainInfo struct {
 	ClaimLabel   string       `json:"claimLabel"`
 	DefaultLock  string       `json:"defaultLock"`
 	DefaultOrder string       `json:"defaultOrder"`
-	Model        string       `json:"model"`    // one-line description of how the vault works here
-	DualFund     bool         `json:"dualFund"` // the exchange can lock buying capacity
-	TestCash     bool         `json:"testCash"` // a button to add test dollars
+	Model        string       `json:"model"`            // one-line description of how the vault works here
+	DualFund     bool         `json:"dualFund"`         // the exchange can lock buying capacity
+	TestCash     bool         `json:"testCash"`         // a button to add test dollars
+	Signet       bool         `json:"signet,omitempty"` // Bitcoin's public signet: no mine buttons, no faucet
+	EVM          bool         `json:"evm,omitempty"`    // runs the CastleVault contract (Ethereum, Polygon, Base, BNB Chain, Avalanche)
+	Color        string       `json:"color,omitempty"`  // coin icon colour
+	Badge        string       `json:"badge,omitempty"`  // coin icon text
 }
 
 type ActionReq struct {
@@ -146,8 +150,11 @@ type Snapshot struct {
 	Vault       *VaultView `json:"vault"`
 	Events      []Event    `json:"events"`
 	Txs         []*TxInfo  `json:"txs"`
-	Who         string     `json:"who,omitempty"`  // separate programs: the wallet's name
-	Book        *BookResp  `json:"book,omitempty"` // separate programs: this coin's order book
+	ReceiveAddr string     `json:"receiveAddr,omitempty"` // signet: where to send coins to this wallet
+	Who         string     `json:"who,omitempty"`         // separate programs: the wallet's name
+	Bumpable    int        `json:"bumpable,omitempty"`    // separate programs: your transactions waiting for a block that can be sped up
+	FeeNote     string     `json:"feeNote,omitempty"`     // separate programs: the node's fee estimate
+	Book        *BookResp  `json:"book,omitempty"`        // separate programs: this coin's order book
 }
 
 type Engine interface {

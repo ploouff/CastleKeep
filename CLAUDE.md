@@ -2,8 +2,10 @@
 
 Castlekeep is a prototype of self-custodial exchange settlement: the user locks coins in a
 vault that needs both the user's and the exchange's signatures, trades against it, and can
-always get out alone after an exit window. **Local test chains only.** Never use real coins,
-mainnet, or real money, and never describe the code as secure or audited (it isn't).
+always get out alone after an exit window. **Test networks only: local test chains, or
+Bitcoin's public signet** (coins with no value; the user approved signet on 2026-11-23).
+Never use real coins, mainnet, or real money, and never describe the code as secure or
+audited (it isn't).
 
 The user runs Windows with Command Prompt and prefers plain, step-by-step explanations.
 
@@ -11,7 +13,7 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 
 | Path | What it is |
 | --- | --- |
-| `console/` | Go web app (module `castlekeep-console`) for Bitcoin, Litecoin and Ethereum. Main work happens here. |
+| `console/` | Go web app (module `castlekeep-console`) for Bitcoin, Litecoin and the EVM chains (Ethereum, Polygon, Base, BNB Chain, Avalanche). Main work happens here. |
 | `console/engine.go` | Shared types (`Engine`, `ActionReq`, `Snapshot`, `VaultView`, event log). Amounts are always in 1e-8 coin units ("sats"; on ETH 1 unit = 1e10 wei). |
 | `console/account.go` | `Account` (one cash balance shared by every engine via `UseAccount`), `accountView` for `/api/account`, and `swap`. |
 | `console/utxo.go` | `UTXOEngine`: runs btcd/ltcd in regtest, handles actions, the exchange's and user's watchtowers, snapshots. |
@@ -29,6 +31,13 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | `console/split_eth.go`, `split_apps_eth.go`, `split_eth_test.go` | Ethereum in the separate programs, and its tests. |
 | `console/split_swap.go`, `split_swap_test.go` | Swaps across the three chains in the separate programs. |
 | `console/split_book.go`, `split_book_test.go` | Order book (separate programs): limit orders, matching (best price, then oldest), reservations, fills each wallet checks against its own order before signing. Page: the "Order book" panel in `index.html` (only shown when the snapshot has `book`), actions `place`/`cancel` via `bookAction`; several wallets with `go run . wallet -name bob -port 9301`. |
+| `console/split_save.go`, `split_save_test.go` | Saving: the exchange (`exchange.json`) and each wallet (`wallet-<name>.json`) save only inputs (keys, amounts, signatures, secrets, some tx hex) after every request/tick and rebuild scripts and txs on `Load`. Half-done steps (`pend`) are dropped. Files are refused if made on another chain (`chainConn.tag` = hash of block 1). Kept chains: `keepChain`, `keepBlocks`/`replayBlocks`, `miner.json`, `eth.json` (kept contract). Flags `-data`, `-fresh` (renames old data, never deletes). Default folder `%USERPROFILE%\castlekeep-data`. |
+| `console/split_signet.go` | Bitcoin signet: `go run . chains -network signet` (Bitcoin only; btcd with `--signet --addrindex`, data in `castlekeep-data\chains-signet`). No mining or faucet; exchange and wallets find coins sent to their addresses with `searchrawtransactions` (`coinsTo`, every 15 s, or the page's "Check for coins" button). |
+| `console/evm_sign.go` | Groundwork for public EVM test networks: local EIP-1559 (type 2) signing with RLP (`sendSigned`), used by `sendRaw` when `EthEngine.signLocal` is on (`EthEndpoint.SignLocally`) and `signer` has the key (set in `AttachEVM` for exchange and wallet). `TestSplitSignedLocally` runs the separate programs on Hardhat with impersonation off. Not wired to any public network yet: that still needs funded keys (faucets), contract deployment and no mine/faucet buttons, like signet. |
+| `console/seal.go` | Password-protected save files: `-password` / `-remove-password` on exchange and wallet (`startSealed`, `passwordFor`), scrypt N=32768 + AES-256-GCM, sealed JSON `{"castlekeep":"sealed",...}`; `x.seal`/`w.seal` used by `save()` and `Load` (`readSaved`). A plain file is copied to `.unprotected-<time>` before sealing. `CASTLEKEEP_PASSWORD` for scripts/tests. Password prompt uses `golang.org/x/crypto/ssh/terminal` (already pinned). |
+| `console/fees.go` | Separate programs, BTC/LTC: fee estimate (`feeRate`: btcd `estimatefee`, else 2 sat/vB), "Speed up" (`SpeedUp`, `bump`: child pays for parent from the wallet's output of a waiting tx, plus confirmed coins if needed), `bumpable` (skips a tx that already has a mempool child), watchtower `autoBump` after 2 blocks during an exit. New vaults have `vaultDef.anchors`: the exit request gets a 330-unit output for each side (`OpenKeysResp.Anchors`, saved as `defRec.Anchors`; old vaults rebuild without). |
+| `console/evm.go` | The EVM chains (`evmChains`: eth, pol, base, bnb, avax) with chain IDs of their public TEST networks, test prices, icon colour/badge; `evmConfig`, `startHardhat` (writes a temp config with `chainId`, `allowBlocksWithSameTimestamp`, optional `initialDate`), `chainOrder`. All EVM chains use `EthEngine` / `xEth` / `wEth` keyed by chain ID (`x.evm`, `w.evm`; empty `Chain` in a message means eth). |
+| `console/evm_keep.go` | Kept EVM chains for the separate programs: a recorder in front of each Hardhat node writes state-changing RPCs to `chains/evm-<id>.jsonl` (first line: genesis time) and replays them on start with the same block timestamps, so hashes match (`TestKeptEVMChainRestarts`). Recorders on ports chains+10.. (9110 eth, 9111 pol, 9112 base, 9113 bnb, 9114 avax). |
 | `TESTING.md` | How to run the tests and try each feature by hand. |
 | `prototype/` | Original Bitcoin CLI demo (separate Go module). |
 | `solana/` | Untested Anchor design. Not compiled. |
@@ -81,7 +90,9 @@ split, wallet signs, exchange signs; settle signature only for the latest state,
 which the exchange stops trading on that vault; same rule on BTC/LTC). Swaps: `split_swap.go` (`/v1/swap` prepares
 both sides, signs the buying side first and takes its price from cash; the wallet checks
 prices and both splits, completes the buying side, then the selling side, which credits
-the sale). No steal demo there.
+the sale). No steal demo there. All three programs keep their data between runs (see
+`split_save.go`); BTC/LTC RPC is on fixed ports (chains port + 1, + 2) so the others can
+reconnect after the chains restart. Bitcoin signet: `split_signet.go`.
 
 **Ethereum (`eth.go`, `CastleVault.sol`)**: both sides sign every state (nonce = state
 index). Settling (`settle`) needs both signatures on a separate `settleHash`
@@ -113,17 +124,20 @@ malicious.
   path the console looks in).
 - **Do not rebuild ltcd.** `go install` for ltcd needs cgo and a C compiler, which isn't
   installed; the existing `ltcd.exe` was prebuilt.
-- Hardhat runs in its own window at `http://127.0.0.1:8545` (started from
-  `%USERPROFILE%\castlekeep-eth` with `npx hardhat node`). Leave it running.
+- Hardhat is installed in `%USERPROFILE%\castlekeep-eth`. The console, the chains program and
+  the tests start their own Hardhat node per EVM chain from there (`-hardhat` to change;
+  `node ...\hardhat\internal\cli\bootstrap.js node --config <temp>`). A Hardhat window at 8545
+  is only used with `-eth-rpc`, or by the Ethereum tests when one is already running.
 - Start the console:
   ```
   cd console
-  go run . -eth-rpc http://127.0.0.1:8545
+  go run .
   ```
-  It opens `http://127.0.0.1:8080`. Each chain mines ~500 blocks / deploys the contract
-  first (about a minute). Ctrl+C stops it and its btcd/ltcd. Flags: `-port`, `-no-browser`.
-- Run the scenario tests (needs Hardhat running for the Ethereum ones; they are skipped
-  with a message if it isn't reachable):
+  It opens `http://127.0.0.1:8080` with all seven chains (`-chains btc,ltc,eth` for fewer).
+  Each chain mines ~500 blocks / deploys the contract first (about a minute). Ctrl+C stops it
+  and its nodes. Flags: `-port`, `-no-browser`, `-eth-rpc`, `-hardhat`, `-chains`.
+- Run the scenario tests (the EVM ones start their own Hardhat nodes; skipped with a message
+  if Hardhat isn't installed):
   ```
   cd console
   go test -v -timeout 30m
@@ -152,6 +166,15 @@ malicious.
   confirms until something calls `evm_mine`. Clock skips (`evm_increaseTime`) are permanent
   on that node.
 - Fees are flat (`txFee = 1000` base units) on BTC/LTC.
+- **btcd and ltcd delete a regtest chain every time they start** (`removeRegressionDB`).
+  Kept chains therefore stay on regtest and replay `blocks.txt` with `submitblock` on start.
+  Don't switch them to simnet: ltcd's simnet stops mining at block 100 with no error.
+- btcd's `getblock` wants verbosity `0` (a number) for raw hex; `keepBlocks` falls back to `false`.
+- rpcclient retries for ~20 s against a node that's gone; `UTXOEngine.Stop` sets `e.node = nil`
+  so a second Stop doesn't hang.
+- Windows Defender has flagged a `go build` copy of the console (`ck.exe`) as "potentially unwanted"
+  and stopped it mid-run (the signet node kept running on its own). Use `go run .`, and stop a
+  leftover node with its `stop` RPC. Don't change Defender settings.
 - `Do` errors wrapped with `userErr` are shown to the user; refused transactions are
   *not* Go errors: they appear as `TxInfo.Status == "rejected"` plus a "bad" event.
 

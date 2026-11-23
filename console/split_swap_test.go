@@ -69,8 +69,8 @@ func (s *splitAll) mineAll() {
 }
 
 func (s *splitAll) share(chain string) int64 {
-	if chain == "eth" {
-		u, _, _, _ := s.w.EthVault()
+	if isEVM(chain) {
+		u, _, _, _ := s.w.EthVault(chain)
 		return u
 	}
 	u, _, _, _, _ := s.w.Vault(chain)
@@ -78,8 +78,8 @@ func (s *splitAll) share(chain string) int64 {
 }
 
 func (s *splitAll) states(chain string) int {
-	if chain == "eth" {
-		_, _, n, _ := s.w.EthVault()
+	if isEVM(chain) {
+		_, _, n, _ := s.w.EthVault(chain)
 		return n
 	}
 	_, _, n, _, _ := s.w.Vault(chain)
@@ -97,9 +97,9 @@ func TestSplitSwap(t *testing.T) {
 	s := newSplitAll(t)
 	s.ok(s.w.Open("btc", oneCoin))
 	s.ok(s.w.Open("ltc", oneCoin))
-	s.ok(s.w.EthOpen(oneCoin))
+	s.ok(s.w.EthOpen("eth", oneCoin))
 	s.mineAll()
-	s.ok(s.w.EthCapacity(oneCoin))
+	s.ok(s.w.EthCapacity("eth", oneCoin))
 	s.ok(s.w.Capacity("ltc", oneCoin))
 	s.mineAll()
 	ethShare := oneCoin - capacityFee(oneCoin)
@@ -162,14 +162,14 @@ func TestSplitSwap(t *testing.T) {
 		s.ok(s.w.Order("ltc", "sell", 1_000_000))
 		s.ok(s.w.Settle("btc"))
 		s.ok(s.w.Settle("ltc"))
-		s.ok(s.w.EthSettle())
+		s.ok(s.w.EthSettle("eth"))
 		s.mineAll()
 		for _, c := range []string{"btc", "ltc"} {
 			if _, _, _, closed, _ := s.w.Vault(c); closed != "settled" {
 				t.Fatalf("%s vault: %q", c, closed)
 			}
 		}
-		if _, _, _, closed := s.w.EthVault(); closed != "settled" {
+		if _, _, _, closed := s.w.EthVault("eth"); closed != "settled" {
 			t.Fatalf("eth vault: %q", closed)
 		}
 	})

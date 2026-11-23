@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 //go:embed web/index.html
@@ -83,14 +84,36 @@ func main() {
 	ltcdPath := flag.String("ltcd", goBin("ltcd"), "path to ltcd (Litecoin)")
 	anvilPath := flag.String("anvil", findAnvil(), "path to anvil (Ethereum)")
 	ethRPC := flag.String("eth-rpc", "", "use an already-running Ethereum dev node instead of anvil, e.g. http://127.0.0.1:8545")
+	hardhat := flag.String("hardhat", defaultHardhatDir(), "folder with Hardhat installed, used to start the other EVM chains' test nodes")
+	only := flag.String("chains", "btc,ltc,eth,pol,base,bnb,avax", "chains to run, comma-separated")
 	port := flag.Int("port", 8080, "port for the web interface")
 	noBrowser := flag.Bool("no-browser", false, "don't open the browser automatically")
 	flag.Parse()
 
-	engines := []Engine{
-		NewUTXOEngine(btcConfig(*btcdPath)),
-		NewUTXOEngine(ltcConfig(*ltcdPath)),
-		NewEthEngine(ethConfig(*anvilPath, *ethRPC)),
+	want := map[string]bool{}
+	for _, id := range strings.Split(*only, ",") {
+		want[strings.TrimSpace(id)] = true
+	}
+	var engines []Engine
+	if want["btc"] {
+		engines = append(engines, NewUTXOEngine(btcConfig(*btcdPath)))
+	}
+	if want["ltc"] {
+		engines = append(engines, NewUTXOEngine(ltcConfig(*ltcdPath)))
+	}
+	for _, c := range evmChains {
+		if !want[c.ID] {
+			continue
+		}
+		rpc := ""
+		if c.ID == "eth" {
+			rpc = *ethRPC
+		}
+		engines = append(engines, NewEthEngine(evmConfig(c, *anvilPath, *hardhat, rpc)))
+	}
+	if len(engines) == 0 {
+		fmt.Println("No chains picked. Use -chains btc,ltc,eth,pol,base,bnb,avax (or some of them).")
+		os.Exit(1)
 	}
 	// One test account: every chain shares its cash balance.
 	acct := NewAccount()

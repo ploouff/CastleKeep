@@ -1,12 +1,13 @@
 # Castlekeep console
 
-A clickable version of Castlekeep for **Bitcoin, Litecoin and Ethereum**. It starts a
+A clickable version of Castlekeep for **Bitcoin, Litecoin, Ethereum, Polygon, Base, BNB Chain
+and Avalanche**. It starts a
 private test chain for each coin on your computer and opens a web page where you can lock
 coins into a vault, trade, settle, request an exit, move the chain forward, and switch the
 exchange between honest, offline and malicious.
 
 Every button creates real transactions, and the chain itself (a Bitcoin node, a Litecoin
-node, or the Ethereum smart contract) decides whether each one is accepted or refused.
+node, or the CastleVault smart contract on an EVM test node) decides whether each one is accepted or refused.
 
 ![Castlekeep console on Ethereum](preview-eth.png)
 
@@ -20,11 +21,12 @@ node, or the Ethereum smart contract) decides whether each one is accepted or re
 | **Bitcoin** | Taproot 2-of-2 script, pre-signed exit request, `CHECKSEQUENCEVERIFY` timelock | 144 blocks (about 24 hours) | **Penalty, both ways:** whoever publishes a state gets their own share locked for 6 blocks. Once a state is replaced, each side holds the other's revocation secret for it, so publishing an old state lets the other side take the cheater's share |
 | **Litecoin** | The same Taproot scripts as Bitcoin | 576 blocks (blocks are 2.5 minutes, so also about 24 hours) | Same as Bitcoin, with a 24-block lock on the exchange's share |
 | **Ethereum** | `CastleVault` smart contract (`contract/CastleVault.sol`). Both sides sign every state. The exchange can lock its own ETH so you can buy from it. | 24 hours on the chain's clock | **Closed:** during an exit only a state with a higher number can replace an older one, and your watchtower submits the newest |
+| **Polygon, Base, BNB Chain, Avalanche** | The same `CastleVault` contract and code as Ethereum, each on its own local test node with the chain ID of that network's public test network (Amoy 80002, Base Sepolia 84532, BNB testnet 97, Fuji 43113). Coins: POL, ETH (on Base), BNB, AVAX | 24 hours on the chain's clock | Closed, as on Ethereum |
 
 ### One account, and swapping coins
 
-All three chains belong to **one test account**. The bar at the top of every tab shows
-your BTC, LTC and ETH (wallet plus your share of each vault), one cash balance, and the
+All the chains belong to **one test account**. The bar at the top of every tab shows
+every coin (wallet plus your share of each vault), one cash balance, and the
 total in test dollars. Cash from selling one coin can be spent on another, and **Add
 $10,000 test cash** works on every tab.
 
@@ -50,7 +52,7 @@ capacity"), for a 0.2% fee taken from your share. You can then buy up to that am
 your cash, or with a swap from another coin, and the coins you buy are in the vault from
 the start.
 
-- **Ethereum:** the exchange sends ETH to the contract (`fund`), once per vault.
+- **Ethereum and the other EVM chains:** the exchange sends coins to the contract (`fund`), once per vault.
 - **Bitcoin and Litecoin:** you and the exchange both sign one transaction (a "splice")
   that spends the vault plus some of the exchange's coins into a bigger vault with the same
   scripts. The exit request and the pay-back are signed again, so the old ones (and every
@@ -76,22 +78,24 @@ go install github.com/btcsuite/btcd@v0.24.2
 go install github.com/ltcsuite/ltcd@v0.23.6
 ```
 
-**Ethereum: option A, Hardhat (tested)**
+**Ethereum, Polygon, Base, BNB Chain and Avalanche: option A, Hardhat (tested)**
 
-Install [Node.js](https://nodejs.org) (the LTS version). Then, in a new folder:
+Install [Node.js](https://nodejs.org) (the LTS version). Then make the folder
+`%USERPROFILE%\castlekeep-eth` and, in it:
 ```
 npm init -y
 npm install hardhat@2
-echo module.exports = {}; > hardhat.config.js
-npx hardhat node
 ```
-Leave that window open: it's your Ethereum test node.
+Castlekeep starts its own Hardhat node for each EVM chain from that folder (one node per
+chain, each with its own chain ID). You don't need to keep a Hardhat window open any more.
+Use `-hardhat <folder>` if you installed it somewhere else.
 
 **Ethereum: option B, Anvil**
 
 Anvil is part of Foundry. Download the Windows release from Foundry's GitHub releases
 page, unzip it, and put `anvil.exe` in `%USERPROFILE%\.foundry\bin`. Castlekeep starts it
-automatically. This path uses the same calls as Hardhat but hasn't been tested yet.
+automatically for every EVM chain (with `--chain-id`). This path uses the same calls as
+Hardhat but hasn't been tested yet.
 
 ## Run it
 
@@ -103,7 +107,8 @@ go mod tidy
 go run .
 ```
 
-If you're using Hardhat for Ethereum, start Castlekeep with:
+To use a Hardhat node you started yourself for Ethereum (the other EVM chains still get
+their own):
 
 ```
 go run . -eth-rpc http://127.0.0.1:8545
@@ -119,6 +124,8 @@ starts fresh.
 | Flag | Use |
 | --- | --- |
 | `-eth-rpc URL` | Use an Ethereum dev node that's already running (Hardhat or Anvil) |
+| `-chains btc,eth,pol` | Run only some chains (default: all seven) |
+| `-hardhat <folder>` | Where Hardhat is installed (default `%USERPROFILE%\castlekeep-eth`) |
 | `-btcd`, `-ltcd`, `-anvil` | Point to a node program that isn't in its default folder |
 | `-port 9000` | Use a different port if 8080 is taken |
 | `-no-browser` | Don't open the browser automatically |
@@ -130,9 +137,10 @@ wallet as **separate programs** that never share private keys: they only send ea
 signatures over the network, and each reads the chain itself. Open three Command Prompt
 windows in the `console` folder and start, in this order:
 
-1. `go run . chains` starts the Bitcoin and Litecoin test nodes and uses your Hardhat node
-   for Ethereum (start Hardhat first, or Ethereum is left out). Wait until it has mined its
-   first blocks and deployed the contract (about a minute).
+1. `go run . chains` starts the Bitcoin and Litecoin test nodes and a Hardhat node for each
+   EVM chain (Ethereum, Polygon, Base, BNB Chain, Avalanche). Wait until it has mined its
+   first blocks and deployed the contracts (about a minute). Add `-eth-rpc
+   http://127.0.0.1:8545` to use a Hardhat node you started yourself for Ethereum.
 2. `go run . exchange` is the exchange server. It holds only the exchange's keys, its wallet
    (20 test coins per chain), prices and cash. Its admin page opens at
    `http://127.0.0.1:9200`, where you set prices and switch it between honest, offline and
@@ -191,14 +199,109 @@ The admin page shows every open order, by account, and the recent trades.
 Not in the separate programs: the "Have the exchange try to steal" demo (the exchange's keys aren't in your wallet to try it with). Ctrl+C in the chains window
 stops the test nodes.
 
+### Saved between runs
+
+The three programs keep everything in `%USERPROFILE%\castlekeep-data`, so you can close
+them and carry on later:
+
+- `chains\` keeps the Bitcoin and Litecoin test chains. (btcd and ltcd wipe a private test
+  chain every time they start, so the chains program saves each block it mines and feeds
+  them back in when it starts again. The node checks every block again.)
+- `chains\evm-pol.jsonl` (one per EVM chain) keeps that chain. Hardhat forgets its chain when
+  it stops, so the chains program records every change (transactions, balances, mined blocks
+  and their times) and plays the record back into a new Hardhat node on the next start. The
+  blocks, contract and vaults come back exactly; the chain's clock stands still while the
+  programs are closed.
+- `exchange.json` holds the exchange's keys, its coins, every vault with its signed
+  states and secrets, cash balances, prices and the order books.
+- `wallet-alice.json` (one per wallet name) holds your keys, revocation secrets, vaults
+  and orders.
+
+These files hold private keys in plain text. That's fine for test coins only.
+
+**Protecting them with a password.** Start the exchange or a wallet with `-password`:
+
+```
+go run . wallet -name alice -password
+```
+
+It asks for a new password twice (not shown as you type) and from then on saves the file
+encrypted: the password is stretched with scrypt and the file sealed with AES-256-GCM. An
+existing plain file is copied to `wallet-alice.json.unprotected-<date>` first, so nothing is
+lost; delete that copy yourself once the password works. Every later start asks for the
+password (with or without `-password`); after three wrong tries the program stops without
+changing anything. `-remove-password` saves the file in plain text again. There is no way to
+get the keys back without the password. For scripts, `CASTLEKEEP_PASSWORD` can hold the
+password instead of typing it. The chains' own files hold no user keys and stay plain.
+
+Anything half-done when a program stopped (for example an order waiting for the second
+signature) is dropped, and the other side just asks again. On the private test chains,
+transactions still waiting for a block when the chains window closes are lost too, so mine
+a block before closing it. With `-eth-rpc`, Ethereum lives in your own Hardhat window
+instead: if that was restarted, its vaults are gone with it, and the programs say so.
+
+
+To start over, add `-fresh` (for example `go run . chains -fresh`). The old data is
+renamed (`… .old-<date>`), never deleted. If you start the chains fresh, start the exchange
+and the wallets with `-fresh` too: they refuse a file made on different chains. Use
+`-data <folder>` to keep the files somewhere else.
+
+### Speeding up a waiting transaction (Bitcoin and Litecoin)
+
+Most vault transactions are signed by both sides long before they are sent (the exit request,
+the pay-back, each state), so their fee is fixed when they are signed. If fees rise, one of
+them could wait a long time for a block. The separate programs handle this with "child pays
+for parent": your wallet spends its own output of the waiting transaction in a new one with a
+higher fee, and miners take both together.
+
+- Vaults opened from now on have a small extra output for each side (330 base units) on the
+  exit request, so either side can speed up an exit. Older saved vaults keep their old exit
+  request (its signatures stay valid) and can still speed up the transactions that pay you
+  directly: a published state, the pay-back, a settlement and your deposit.
+- When one of your transactions is waiting, the wallet page shows **Speed up your waiting
+  transaction**. It aims for the node's fee estimate, or 2 sat/vB when btcd has none (new
+  private chains, a freshly synced signet node; the page says which), and at least twice the
+  rate the waiting transaction pays.
+- During an exit, your watchtower does this by itself once a transaction of yours has waited 2
+  blocks.
+- A pair that has been sped up can't be sped up again.
+
+The one-program console still uses a flat fee: there you mine the blocks yourself.
+
+### Bitcoin signet (public test network)
+
+Signet is Bitcoin's public test network: real blocks about every 10 minutes, made by the
+network, and coins with no value. Bitcoin only (Litecoin has no signet).
+
+```
+go run . chains -network signet
+go run . exchange
+go run . wallet -name alice
+```
+
+- The first `chains -network signet` downloads the signet chain into
+  `castlekeep-data\chains-signet` (a few GB; it can take hours). The window shows how far
+  it has got. Later starts only catch up.
+- There's no Mine button and no built-in faucet. Each wallet page shows **your signet
+  address**: get free coins from a public signet faucet (search the web for "signet
+  faucet") and send them there, then press **Check for coins sent to your address**.
+  The wallet also looks by itself every 15 seconds.
+- The exchange's admin page shows the exchange's signet address. Send it coins too if you
+  want to buy into a vault (buying capacity comes from its wallet).
+- Everything waits for real blocks: a lock confirms in about 10 minutes, the cheat window
+  is 6 blocks (about an hour), and the exit window is 144 blocks (about a day). The
+  watchtowers keep running while the programs are open, and everything is saved if you
+  close them.
+- Anything you send on signet is public, like on the real network.
+
 ## The screen
 
 | Area | What it does |
 | --- | --- |
 | **Account bar** | Every coin you hold, the shared cash balance and the total value, on every tab. |
-| **Chain tabs** | Switch between Bitcoin, Litecoin and Ethereum. A green dot means ready. |
-| **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on Ethereum they mine one block or skip the clock ahead an hour or a day. |
-| **Your wallet** | Test coins only you control. Get more from the faucet, or lock some into a vault. On Ethereum, gas fees come out of this. |
+| **Chain tabs** | Switch between the coins. Each has a small coloured badge (drawn by the page, not the coin's official logo). A green dot means ready. |
+| **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on the EVM chains they mine one block or skip the clock ahead an hour or a day. |
+| **Your wallet** | Test coins only you control. Get more from the faucet, or lock some into a vault. On the EVM chains, gas fees come out of this. |
 | **Vault** | The latest signed split, the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. |
 | **Exchange** | Set the price, sell or buy, swap into another coin, choose how the exchange behaves, and switch your watchtower on or off. |
 | **Activity and Transaction inspector** | Everything that happened, and the exact rule that accepted or refused each transaction. |
@@ -235,12 +338,14 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `account.go` | The shared test account (one cash balance) and coin-to-coin swaps |
 | `utxo.go`, `utxo_vault.go` | Bitcoin and Litecoin engine: Taproot scripts and transactions |
 | `eth.go` | Ethereum engine: JSON-RPC, Keccak, signatures and contract calls |
+| `evm.go` | The EVM chains (Ethereum, Polygon, Base, BNB Chain, Avalanche): names, chain IDs, test prices, icon colours, and starting Hardhat |
+| `evm_keep.go` | Keeps the EVM test chains between runs (records changes, plays them back) |
 | `contract/CastleVault.sol` | The Ethereum smart contract (`.bin` is the compiled bytecode) |
 | `web/index.html` | The interface |
 | `split_core.go`, `split_net.go` | Separate programs: the vault built from public keys only, and the messages between them |
 | `split_exchange.go`, `split_wallet.go` | The exchange server and your wallet as separate programs |
 | `split_apps.go`, `web/exchange.html` | The `chains`, `exchange` and `wallet` commands, and the exchange's admin page |
-| `split_eth.go`, `split_apps_eth.go` | Ethereum in the separate programs |
+| `split_eth.go`, `split_apps_eth.go` | The EVM chains in the separate programs |
 | `split_swap.go` | Swaps in the separate programs |
 
 ## Known limits

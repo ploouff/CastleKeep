@@ -30,8 +30,10 @@ type EthInfoResp struct {
 	ExchAddr  string
 	ExitDelay int64
 }
+type EthChainReq struct{ Chain string } // empty: Ethereum
 type EthOpenReq struct {
 	Account, VaultID string
+	Chain            string
 }
 type EthStateOffer struct {
 	VaultID            string
@@ -43,6 +45,7 @@ type EthCommitReq struct {
 	VaultID string
 	Nonce   int
 	UserSig []byte
+	Chain   string
 }
 type EthCommitResp struct {
 	ExchSig   []byte
@@ -51,26 +54,31 @@ type EthCommitResp struct {
 type EthOrderReq struct {
 	VaultID, Side string
 	Sats          int64
+	Chain         string
 }
 type EthCapacityReq struct {
 	VaultID string
 	Sats    int64
+	Chain   string
 }
 type EthSettleReq struct {
 	VaultID string
 	UserSig []byte // on the settle message for the latest state
+	Chain   string
 }
 type EthSettleResp struct{ ExchSig []byte }
 
 // ------------------------------------------------------------------ exchange side
 
 type xEth struct {
-	c     *EthEngine // RPC and contract helpers only
-	key   *btcec.PrivateKey
-	addr  string
-	delay int64
-	price int64
-	mode  string
+	id, ticker string
+	vaults     map[string]*xEthVault
+	c          *EthEngine // RPC and contract helpers only
+	key        *btcec.PrivateKey
+	addr       string
+	delay      int64
+	price      int64
+	mode       string
 }
 
 type xEthVault struct {
@@ -103,32 +111,75 @@ func (v *xEthVault) log(f string, a ...any) {
 
 // AttachEth connects the exchange to the Ethereum node and contract.
 func (x *Exchange) AttachEth(ep EthEndpoint, price int64) string {
+	return x.AttachEVM("eth", ep, price)
+}
+
+// AttachEVM connects the exchange to one EVM chain's node and contract.
+func (x *Exchange) AttachEVM(chain string, ep EthEndpoint, price int64) string {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	k, _ := btcec.NewPrivateKey()
-	x.eth = &xEth{c: newEthLight(ep), key: k, addr: ethAddress(k), delay: ep.ExitDelay, price: price, mode: "honest"}
-	x.ethVaults = map[string]*xEthVault{}
-	return x.eth.addr
+	ticker := "ETH"
+	if c, ok := evmByID(chain); ok {
+		ticker = c.Ticker
+	}
+	if x.evm == nil {
+		x.evm = map[string]*xEth{}
+	}
+	xe := &xEth{id: chain, ticker: ticker, c: newEthLight(ep), key: k, addr: ethAddress(k), delay: ep.ExitDelay, price: price, mode: "honest",
+		vaults: map[string]*xEthVault{}}
+	xe.c.signer = func(a string) *btcec.PrivateKey {
+		if strings.EqualFold(a, xe.addr) {
+			return xe.key
+		}
+		return nil
+	}
+	x.evm[chain] = xe
+	return xe.addr
 }
 
-func (x *Exchange) ethVault(id string) (*xEthVault, error) {
-	if x.eth == nil {
-		return nil, userErr("This exchange has no Ethereum.")
+// evmID is the chain a message is for. Empty means Ethereum, as before
+// there were other EVM chains.
+func evmID(chain string) string {
+	if chain == "" {
+		return "eth"
 	}
-	v, ok := x.ethVaults[id]
+	return chain
+}
+
+// evmc returns the exchange's side of an EVM chain (x.mu held).
+func (x *Exchange) evmc(chain string) (*xEth, error) {
+	xe := x.evm[evmID(chain)]
+	if xe == nil {
+		name := evmID(chain)
+		if c, ok := evmByID(name); ok {
+			name = c.Name
+		}
+		return nil, userErr("This exchange has no %s.", name)
+	}
+	return xe, nil
+}
+
+func (x *Exchange) ethVault(chain, id string) (*xEth, *xEthVault, error) {
+	xe, err := x.evmc(chain)
+	if err != nil {
+		return nil, nil, err
+	}
+	v, ok := xe.vaults[id]
 	if !ok {
-		return nil, userErr("Unknown vault.")
+		return nil, nil, userErr("Unknown vault.")
 	}
-	return v, nil
+	return xe, v, nil
 }
 
-func (x *Exchange) ethInfo(empty) (EthInfoResp, error) {
+func (x *Exchange) ethInfo(r EthChainReq) (EthInfoResp, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if x.eth == nil {
-		return EthInfoResp{}, userErr("This exchange has no Ethereum.")
+	xe, err := x.evmc(r.Chain)
+	if err != nil {
+		return EthInfoResp{}, err
 	}
-	return EthInfoResp{x.eth.addr, x.eth.delay}, nil
+	return EthInfoResp{xe.addr, xe.delay}, nil
 }
 
 // ethOpen: the user has already locked ETH with open(); the deposit is safe
@@ -137,38 +188,39 @@ func (x *Exchange) ethInfo(empty) (EthInfoResp, error) {
 func (x *Exchange) ethOpen(r EthOpenReq) (EthStateOffer, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if x.eth == nil {
-		return EthStateOffer{}, userErr("This exchange has no Ethereum.")
+	xe, err := x.evmc(r.Chain)
+	if err != nil {
+		return EthStateOffer{}, err
 	}
-	if x.eth.mode == "offline" {
+	if xe.mode == "offline" {
 		return EthStateOffer{}, userErr("The exchange is offline.")
 	}
-	if _, ok := x.ethVaults[r.VaultID]; ok {
+	if _, ok := xe.vaults[r.VaultID]; ok {
 		return EthStateOffer{}, userErr("This vault is already registered.")
 	}
 	id, ok := new(big.Int).SetString(r.VaultID, 10)
 	if !ok {
 		return EthStateOffer{}, userErr("Bad vault number.")
 	}
-	cv, err := x.eth.c.readVaultID(id)
+	cv, err := xe.c.readVaultID(id)
 	if err != nil || cv.amount == 0 {
 		return EthStateOffer{}, userErr("That vault isn't on the chain yet. Mine a block first.")
 	}
-	if !strings.EqualFold(cv.exchange, x.eth.addr) || cv.exitDelay != x.eth.delay || cv.closed || cv.exitStart != 0 {
+	if !strings.EqualFold(cv.exchange, xe.addr) || cv.exitDelay != xe.delay || cv.closed || cv.exitStart != 0 {
 		return EthStateOffer{}, userErr("That vault isn't set up with this exchange's address and exit delay.")
 	}
 	st := &ethState{Index: 0, Label: "Opening balance", UserSats: cv.amount}
 	v := &xEthVault{id: id, account: r.Account, user: cv.user, exchLast: -1}
 	v.pend = &xEthPend{kind: "open", st: st}
-	x.ethVaults[r.VaultID] = v
+	xe.vaults[r.VaultID] = v
 	return EthStateOffer{r.VaultID, 0, st.Label, st.UserSats, 0}, nil
 }
 
-func (x *Exchange) ethTradable(v *xEthVault) error {
+func (x *Exchange) ethTradable(xe *xEth, v *xEthVault) error {
 	if len(v.states) == 0 || v.closed {
 		return userErr("This vault isn't open.")
 	}
-	if x.eth.mode == "offline" {
+	if xe.mode == "offline" {
 		return userErr("The exchange is offline and isn't accepting orders.")
 	}
 	if v.settling {
@@ -177,7 +229,7 @@ func (x *Exchange) ethTradable(v *xEthVault) error {
 	if v.pend != nil && v.pend.kind == "fund" {
 		return userErr("The exchange's deposit is waiting for a block.")
 	}
-	cv, err := x.eth.c.readVaultID(v.id)
+	cv, err := xe.c.readVaultID(v.id)
 	if err != nil {
 		return err
 	}
@@ -190,34 +242,34 @@ func (x *Exchange) ethTradable(v *xEthVault) error {
 func (x *Exchange) ethOrder(r EthOrderReq) (EthStateOffer, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	v, err := x.ethVault(r.VaultID)
+	xe, v, err := x.ethVault(r.Chain, r.VaultID)
 	if err != nil {
 		return EthStateOffer{}, err
 	}
-	if err := x.ethTradable(v); err != nil {
+	if err := x.ethTradable(xe, v); err != nil {
 		return EthStateOffer{}, err
 	}
 	if r.Sats <= 0 {
 		return EthStateOffer{}, userErr("Enter an amount above zero.")
 	}
 	l := v.latest()
-	cost := orderCost(r.Sats, x.eth.price)
+	cost := orderCost(r.Sats, xe.price)
 	user, exch := l.UserSats-r.Sats, l.ExchSats+r.Sats
-	label := fmt.Sprintf("Sold %s at %s", fmtCoin(r.Sats, "ETH"), fmtUSD(x.eth.price*100))
+	label := fmt.Sprintf("Sold %s at %s", fmtCoin(r.Sats, xe.ticker), fmtUSD(xe.price*100))
 	switch r.Side {
 	case "sell":
 		if r.Sats > l.UserSats {
-			return EthStateOffer{}, userErr("You only have %s in the vault to sell.", fmtCoin(l.UserSats, "ETH"))
+			return EthStateOffer{}, userErr("You only have %s in the vault to sell.", fmtCoin(l.UserSats, xe.ticker))
 		}
 	case "buy":
 		if r.Sats > l.ExchSats {
-			return EthStateOffer{}, userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", fmtCoin(l.ExchSats, "ETH"))
+			return EthStateOffer{}, userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", fmtCoin(l.ExchSats, xe.ticker))
 		}
 		if cost > x.cash[v.account] {
 			return EthStateOffer{}, userErr("That costs %s and you have %s in cash.", fmtUSD(cost), fmtUSD(x.cash[v.account]))
 		}
 		user, exch = l.UserSats+r.Sats, l.ExchSats-r.Sats
-		label = fmt.Sprintf("Bought %s at %s", fmtCoin(r.Sats, "ETH"), fmtUSD(x.eth.price*100))
+		label = fmt.Sprintf("Bought %s at %s", fmtCoin(r.Sats, xe.ticker), fmtUSD(xe.price*100))
 	default:
 		return EthStateOffer{}, userErr("Unknown order side.")
 	}
@@ -231,7 +283,7 @@ func (x *Exchange) ethOrder(r EthOrderReq) (EthStateOffer, error) {
 func (x *Exchange) ethCommit(r EthCommitReq) (EthCommitResp, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	v, err := x.ethVault(r.VaultID)
+	xe, v, err := x.ethVault(r.Chain, r.VaultID)
 	if err != nil {
 		return EthCommitResp{}, err
 	}
@@ -239,7 +291,7 @@ func (x *Exchange) ethCommit(r EthCommitReq) (EthCommitResp, error) {
 	if p == nil || p.kind == "fund" || p.st.Index != r.Nonce {
 		return EthCommitResp{}, userErr("There's no matching state waiting for your signature.")
 	}
-	d := x.eth.c.stateDigest(v.id, int64(p.st.Index), p.st.UserSats)
+	d := xe.c.stateDigest(v.id, int64(p.st.Index), p.st.UserSats)
 	if !strings.EqualFold(recoverAddr(d, r.UserSig), v.user) {
 		return EthCommitResp{}, userErr("Your signature on the new state doesn't check out.")
 	}
@@ -254,7 +306,7 @@ func (x *Exchange) ethCommit(r EthCommitReq) (EthCommitResp, error) {
 		}
 	}
 	p.st.userSig = r.UserSig
-	p.st.exchSig = signDigest(x.eth.key, d)
+	p.st.exchSig = signDigest(xe.key, d)
 	v.states = append(v.states, p.st)
 	v.pend = nil
 	if p.done != nil {
@@ -270,11 +322,11 @@ func (x *Exchange) ethCommit(r EthCommitReq) (EthCommitResp, error) {
 func (x *Exchange) ethCapacity(r EthCapacityReq) (empty, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	v, err := x.ethVault(r.VaultID)
+	xe, v, err := x.ethVault(r.Chain, r.VaultID)
 	if err != nil {
 		return empty{}, err
 	}
-	if err := x.ethTradable(v); err != nil {
+	if err := x.ethTradable(xe, v); err != nil {
 		return empty{}, err
 	}
 	if r.Sats < 100_000 || r.Sats > 5*unit {
@@ -284,27 +336,27 @@ func (x *Exchange) ethCapacity(r EthCapacityReq) (empty, error) {
 		return empty{}, userErr("The fee is more than your share of the vault.")
 	}
 	info := &TxInfo{Label: "Exchange locks buying capacity"}
-	hash, err := x.eth.c.send(x.eth.addr, toWei(r.Sats), calldata("fund(uint256)", wordInt(v.id)), info, "fund sent", "fund refused")
+	hash, err := xe.c.send(xe.addr, toWei(r.Sats), calldata("fund(uint256)", wordInt(v.id)), info, "fund sent", "fund refused")
 	if err != nil {
 		return empty{}, userErr("The contract refused the exchange's deposit: %s", revertReason(err))
 	}
 	v.fundTx, v.fundAmt = hash, r.Sats
 	v.pend = &xEthPend{kind: "fund"}
-	v.log("Sent %s of buying capacity", fmtCoin(r.Sats, "ETH"))
+	v.log("Sent %s of buying capacity", fmtCoin(r.Sats, xe.ticker))
 	return empty{}, nil
 }
 
 func (x *Exchange) ethCapacityOffer(r EthOpenReq) (EthStateOffer, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	v, err := x.ethVault(r.VaultID)
+	xe, v, err := x.ethVault(r.Chain, r.VaultID)
 	if err != nil {
 		return EthStateOffer{}, err
 	}
 	if v.pend == nil || v.pend.kind != "fund" {
 		return EthStateOffer{}, userErr("No buying capacity is being added.")
 	}
-	switch x.eth.c.receipt(v.fundTx) {
+	switch xe.c.receipt(v.fundTx) {
 	case 0:
 		return EthStateOffer{}, userErr("The exchange's deposit hasn't confirmed yet.")
 	case -1:
@@ -313,7 +365,7 @@ func (x *Exchange) ethCapacityOffer(r EthOpenReq) (EthStateOffer, error) {
 	}
 	l := v.latest()
 	fee := capacityFee(v.fundAmt)
-	label := fmt.Sprintf("Exchange locked %s (fee %s)", fmtCoin(v.fundAmt, "ETH"), fmtCoin(fee, "ETH"))
+	label := fmt.Sprintf("Exchange locked %s (fee %s)", fmtCoin(v.fundAmt, xe.ticker), fmtCoin(fee, xe.ticker))
 	st := &ethState{Index: len(v.states), Label: label, UserSats: l.UserSats - fee, ExchSats: l.ExchSats + v.fundAmt + fee}
 	v.pend = &xEthPend{kind: "capacity", st: st}
 	return EthStateOffer{r.VaultID, st.Index, label, st.UserSats, st.ExchSats}, nil
@@ -322,42 +374,45 @@ func (x *Exchange) ethCapacityOffer(r EthOpenReq) (EthStateOffer, error) {
 func (x *Exchange) ethSettle(r EthSettleReq) (EthSettleResp, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	v, err := x.ethVault(r.VaultID)
+	xe, v, err := x.ethVault(r.Chain, r.VaultID)
 	if err != nil {
 		return EthSettleResp{}, err
 	}
-	switch x.eth.mode {
+	switch xe.mode {
 	case "offline":
 		return EthSettleResp{}, userErr("The exchange is offline. Request an exit instead.")
 	case "malicious":
 		return EthSettleResp{}, userErr("The exchange won't co-sign a settlement. Request an exit instead.")
 	}
 	if !v.settling {
-		if err := x.ethTradable(v); err != nil {
+		if err := x.ethTradable(xe, v); err != nil {
 			return EthSettleResp{}, err
 		}
 	}
 	l := v.latest()
-	d := x.eth.c.settleDigest(v.id, int64(l.Index), l.UserSats)
+	d := xe.c.settleDigest(v.id, int64(l.Index), l.UserSats)
 	if !strings.EqualFold(recoverAddr(d, r.UserSig), v.user) {
 		return EthSettleResp{}, userErr("Your settle signature doesn't check out (it must be for the latest state).")
 	}
 	v.settling = true
-	return EthSettleResp{signDigest(x.eth.key, d)}, nil
+	return EthSettleResp{signDigest(xe.key, d)}, nil
 }
 
 // ethTick is the exchange's Ethereum watchtower: during an exit it submits
 // its latest state (or, when malicious, the one that pays it most).
 func (x *Exchange) ethTick() {
-	if x.eth == nil {
-		return
+	for _, xe := range x.evm {
+		x.evmTick(xe)
 	}
-	now := x.eth.c.chainTime()
-	for _, v := range x.ethVaults {
+}
+
+func (x *Exchange) evmTick(xe *xEth) {
+	now := xe.c.chainTime()
+	for _, v := range xe.vaults {
 		if v.closed || len(v.states) == 0 {
 			continue
 		}
-		cv, err := x.eth.c.readVaultID(v.id)
+		cv, err := xe.c.readVaultID(v.id)
 		if err != nil {
 			continue
 		}
@@ -366,22 +421,22 @@ func (x *Exchange) ethTick() {
 			v.log("Vault closed on the chain")
 			continue
 		}
-		if cv.exitStart == 0 || now >= cv.exitStart+cv.exitDelay || x.eth.mode == "offline" {
+		if cv.exitStart == 0 || now >= cv.exitStart+cv.exitDelay || xe.mode == "offline" {
 			continue
 		}
 		pick := v.latest()
-		if x.eth.mode == "malicious" {
+		if xe.mode == "malicious" {
 			for _, s := range v.states {
 				if s.ExchSats > pick.ExchSats {
 					pick = s
 				}
 			}
 		}
-		busy := v.exchPend != "" && x.eth.c.receipt(v.exchPend) == 0
+		busy := v.exchPend != "" && xe.c.receipt(v.exchPend) == 0
 		if busy || v.exchLast == pick.Index || (cv.hasBest && int64(pick.Index) <= cv.bestNonce) {
 			continue
 		}
-		hash, err := x.eth.c.send(x.eth.addr, nil, x.eth.c.submitCall(v.id, int64(pick.Index), pick.UserSats, pick.userSig, pick.exchSig),
+		hash, err := xe.c.send(xe.addr, nil, xe.c.submitCall(v.id, int64(pick.Index), pick.UserSats, pick.userSig, pick.exchSig),
 			&TxInfo{Label: "Exchange submits a state"}, "submitted", "refused")
 		if err == nil {
 			v.exchLast, v.exchPend = pick.Index, hash
@@ -393,12 +448,13 @@ func (x *Exchange) ethTick() {
 // ------------------------------------------------------------------ wallet side
 
 type wEth struct {
-	c        *EthEngine
-	key      *btcec.PrivateKey
-	addr     string
-	delay    int64
-	exchAddr string
-	vault    *wEthVault
+	id, ticker string
+	c          *EthEngine
+	key        *btcec.PrivateKey
+	addr       string
+	delay      int64
+	exchAddr   string
+	vault      *wEthVault
 }
 
 type wEthVault struct {
@@ -420,39 +476,70 @@ func (v *wEthVault) log(f string, a ...any) {
 }
 
 // AttachEth gives the wallet its own Ethereum key on the node.
-func (w *Wallet) AttachEth(ep EthEndpoint) string {
+func (w *Wallet) AttachEth(ep EthEndpoint) string { return w.AttachEVM("eth", ep) }
+
+// AttachEVM gives the wallet its own key on one EVM chain.
+func (w *Wallet) AttachEVM(chain string, ep EthEndpoint) string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	k, _ := btcec.NewPrivateKey()
-	w.eth = &wEth{c: newEthLight(ep), key: k, addr: ethAddress(k), delay: ep.ExitDelay}
-	return w.eth.addr
+	ticker := "ETH"
+	if c, ok := evmByID(chain); ok {
+		ticker = c.Ticker
+	}
+	if w.evm == nil {
+		w.evm = map[string]*wEth{}
+	}
+	we := &wEth{id: chain, ticker: ticker, c: newEthLight(ep), key: k, addr: ethAddress(k), delay: ep.ExitDelay}
+	we.c.signer = func(a string) *btcec.PrivateKey {
+		if strings.EqualFold(a, we.addr) {
+			return we.key
+		}
+		return nil
+	}
+	w.evm[chain] = we
+	return we.addr
 }
 
-func (w *Wallet) ethVault() (*wEth, *wEthVault, error) {
-	if w.eth == nil {
-		return nil, nil, userErr("This wallet has no Ethereum.")
+// evmw returns the wallet's side of an EVM chain (w.mu held).
+func (w *Wallet) evmw(chain string) (*wEth, error) {
+	we := w.evm[evmID(chain)]
+	if we == nil {
+		name := evmID(chain)
+		if c, ok := evmByID(name); ok {
+			name = c.Name
+		}
+		return nil, userErr("This wallet has no %s.", name)
 	}
-	if w.eth.vault == nil || w.eth.vault.closed != "" {
+	return we, nil
+}
+
+func (w *Wallet) ethVault(chain string) (*wEth, *wEthVault, error) {
+	we, err := w.evmw(chain)
+	if err != nil {
+		return nil, nil, err
+	}
+	if we.vault == nil || we.vault.closed != "" {
 		return nil, nil, userErr("Open a vault first.")
 	}
-	return w.eth, w.eth.vault, nil
+	return we, we.vault, nil
 }
 
 // EthOpen locks ETH with the contract's open(). This is safe to do before
 // the exchange signs anything: if nobody ever submits a state, finalize pays
 // the deposit back after the exit window.
-func (w *Wallet) EthOpen(sats int64) error {
+func (w *Wallet) EthOpen(chain string, sats int64) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	we := w.eth
-	if we == nil {
-		return userErr("This wallet has no Ethereum.")
+	we, err := w.evmw(chain)
+	if err != nil {
+		return err
 	}
 	if we.vault != nil && we.vault.closed == "" {
 		return userErr("You already have an open vault.")
 	}
 	var info EthInfoResp
-	if err := call(w.base, "/v1/eth/info", empty{}, &info); err != nil {
+	if err := call(w.base, "/v1/eth/info", EthChainReq{we.id}, &info); err != nil {
 		return err
 	}
 	if info.ExitDelay != we.delay {
@@ -470,7 +557,7 @@ func (w *Wallet) EthOpen(sats int64) error {
 		return userErr("The contract refused the deposit: %s", revertReason(err))
 	}
 	we.vault = &wEthVault{id: id, openTx: hash, userLast: -1}
-	we.vault.log("Locked %s into vault #%s. Mine a block to confirm it", fmtCoin(sats, "ETH"), id)
+	we.vault.log("Locked %s into vault #%s. Mine a block to confirm it", fmtCoin(sats, we.ticker), id)
 	return nil
 }
 
@@ -483,7 +570,7 @@ func (w *Wallet) ethAgree(we *wEth, v *wEthVault, off EthStateOffer, wantUser, t
 	d := we.c.stateDigest(v.id, int64(off.Nonce), off.UserSats)
 	sig := signDigest(we.key, d)
 	var cr EthCommitResp
-	if err := call(w.base, "/v1/eth/commit", EthCommitReq{off.VaultID, off.Nonce, sig}, &cr); err != nil {
+	if err := call(w.base, "/v1/eth/commit", EthCommitReq{off.VaultID, off.Nonce, sig, we.id}, &cr); err != nil {
 		return err
 	}
 	if !strings.EqualFold(recoverAddr(d, cr.ExchSig), we.exchAddr) {
@@ -515,7 +602,7 @@ func (w *Wallet) ethRegister(we *wEth, v *wEthVault) {
 		return
 	}
 	var off EthStateOffer
-	if call(w.base, "/v1/eth/open", EthOpenReq{w.Account, v.id.String()}, &off) != nil {
+	if call(w.base, "/v1/eth/open", EthOpenReq{w.Account, v.id.String(), we.id}, &off) != nil {
 		return
 	}
 	w.ethAgree(we, v, off, cv.amount, cv.amount)
@@ -526,10 +613,10 @@ func (w *Wallet) ethAmount(we *wEth, v *wEthVault) int64 {
 	return cv.amount
 }
 
-func (w *Wallet) EthOrder(side string, sats int64) error {
+func (w *Wallet) EthOrder(chain, side string, sats int64) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	we, v, err := w.ethVault()
+	we, v, err := w.ethVault(chain)
 	if err != nil {
 		return err
 	}
@@ -540,7 +627,7 @@ func (w *Wallet) EthOrder(side string, sats int64) error {
 		return userErr("Not trading: %s", v.exchFault)
 	}
 	var off EthStateOffer
-	if err := call(w.base, "/v1/eth/order", EthOrderReq{v.id.String(), side, sats}, &off); err != nil {
+	if err := call(w.base, "/v1/eth/order", EthOrderReq{v.id.String(), side, sats, we.id}, &off); err != nil {
 		return err
 	}
 	want := v.latest().UserSats - sats
@@ -550,18 +637,18 @@ func (w *Wallet) EthOrder(side string, sats int64) error {
 	return w.ethAgree(we, v, off, want, w.ethAmount(we, v))
 }
 
-func (w *Wallet) EthCapacity(sats int64) error {
+func (w *Wallet) EthCapacity(chain string, sats int64) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, v, err := w.ethVault()
+	we, v, err := w.ethVault(chain)
 	if err != nil {
 		return err
 	}
-	if err := call(w.base, "/v1/eth/capacity", EthCapacityReq{v.id.String(), sats}, nil); err != nil {
+	if err := call(w.base, "/v1/eth/capacity", EthCapacityReq{v.id.String(), sats, we.id}, nil); err != nil {
 		return err
 	}
 	v.capPending, v.capSats = true, sats
-	v.log("The exchange is locking %s. Mine a block to confirm it", fmtCoin(sats, "ETH"))
+	v.log("The exchange is locking %s. Mine a block to confirm it", fmtCoin(sats, we.ticker))
 	return nil
 }
 
@@ -572,7 +659,7 @@ func (w *Wallet) ethCapacityAgree(we *wEth, v *wEthVault) {
 		return
 	}
 	var off EthStateOffer
-	if call(w.base, "/v1/eth/capacity/offer", EthOpenReq{w.Account, v.id.String()}, &off) != nil {
+	if call(w.base, "/v1/eth/capacity/offer", EthOpenReq{w.Account, v.id.String(), we.id}, &off) != nil {
 		return
 	}
 	cv, err := we.c.readVaultID(v.id)
@@ -587,10 +674,10 @@ func (w *Wallet) ethCapacityAgree(we *wEth, v *wEthVault) {
 
 // EthSettle signs the settle message for the latest state, gets the
 // exchange's, checks it, and sends settle().
-func (w *Wallet) EthSettle() error {
+func (w *Wallet) EthSettle(chain string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	we, v, err := w.ethVault()
+	we, v, err := w.ethVault(chain)
 	if err != nil {
 		return err
 	}
@@ -601,7 +688,7 @@ func (w *Wallet) EthSettle() error {
 	d := we.c.settleDigest(v.id, int64(l.Index), l.UserSats)
 	us := signDigest(we.key, d)
 	var sr EthSettleResp
-	if err := call(w.base, "/v1/eth/settle", EthSettleReq{v.id.String(), us}, &sr); err != nil {
+	if err := call(w.base, "/v1/eth/settle", EthSettleReq{v.id.String(), us, we.id}, &sr); err != nil {
 		return err
 	}
 	if !strings.EqualFold(recoverAddr(d, sr.ExchSig), we.exchAddr) {
@@ -615,10 +702,10 @@ func (w *Wallet) EthSettle() error {
 	return nil
 }
 
-func (w *Wallet) EthExit() error {
+func (w *Wallet) EthExit(chain string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	we, v, err := w.ethVault()
+	we, v, err := w.ethVault(chain)
 	if err != nil {
 		return err
 	}
@@ -630,10 +717,10 @@ func (w *Wallet) EthExit() error {
 	return nil
 }
 
-func (w *Wallet) EthClaim() error {
+func (w *Wallet) EthClaim(chain string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	we, v, err := w.ethVault()
+	we, v, err := w.ethVault(chain)
 	if err != nil {
 		return err
 	}
@@ -647,8 +734,13 @@ func (w *Wallet) EthClaim() error {
 
 // ethTick is the wallet's Ethereum upkeep and watchtower.
 func (w *Wallet) ethTick() {
-	we := w.eth
-	if we == nil || we.vault == nil {
+	for _, we := range w.evm {
+		w.evmTick(we)
+	}
+}
+
+func (w *Wallet) evmTick(we *wEth) {
+	if we.vault == nil {
 		return
 	}
 	v := we.vault
@@ -683,20 +775,25 @@ func (w *Wallet) ethTick() {
 }
 
 // EthVault is a summary for tests.
-func (w *Wallet) EthVault() (userSats, exchSats int64, states int, closed string) {
+func (w *Wallet) EthVault(chain string) (userSats, exchSats int64, states int, closed string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.eth == nil || w.eth.vault == nil || len(w.eth.vault.states) == 0 {
+	we := w.evm[evmID(chain)]
+	if we == nil || we.vault == nil || len(we.vault.states) == 0 {
 		return
 	}
-	v := w.eth.vault
+	v := we.vault
 	l := v.latest()
 	return l.UserSats, l.ExchSats, len(v.states), v.closed
 }
 
 // EthBalance is the wallet's ETH balance on the node.
-func (w *Wallet) EthBalance() int64 {
+func (w *Wallet) EthBalance(chain string) int64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return fromWei(w.eth.c.balance(w.eth.addr))
+	we := w.evm[evmID(chain)]
+	if we == nil {
+		return 0
+	}
+	return fromWei(we.c.balance(we.addr))
 }

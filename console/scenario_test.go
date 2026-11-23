@@ -71,10 +71,23 @@ func engine(t *testing.T, chain string) Engine {
 			e = NewUTXOEngine(ltcConfig(goBin("ltcd")))
 		case "eth":
 			url := ethRPCURL()
-			if !ethReachable(url) {
-				t.Skipf("no Ethereum node at %s; start Hardhat (npx hardhat node) to run the Ethereum tests", url)
+			switch {
+			case ethReachable(url):
+				e = NewEthEngine(ethConfig("", url))
+			case hardhatInstalled(defaultHardhatDir()):
+				e = NewEthEngine(evmConfig(evmChains[0], "", defaultHardhatDir(), ""))
+			default:
+				t.Skipf("no Ethereum node at %s and no Hardhat in %s; start Hardhat (npx hardhat node) to run the Ethereum tests", url, defaultHardhatDir())
 			}
-			e = NewEthEngine(ethConfig("", url))
+		default:
+			c, ok := evmByID(chain)
+			if !ok {
+				t.Fatalf("unknown chain %s", chain)
+			}
+			if !hardhatInstalled(defaultHardhatDir()) {
+				t.Skipf("Hardhat isn't installed in %s, needed to start a %s test node", defaultHardhatDir(), c.Name)
+			}
+			e = NewEthEngine(evmConfig(c, "", defaultHardhatDir(), ""))
 		}
 		if s := e.Snapshot(); !s.Available {
 			t.Skipf("%s not available: %s", chain, s.Unavailable)
@@ -363,16 +376,22 @@ func utxoTheft(h *harness) {
 
 // ------------------------------------------------------------------ Ethereum
 
-func TestEthereum(t *testing.T) {
-	t.Run("NormalTradeAndSettle", func(t *testing.T) { ethNormal(newHarness(t, "eth")) })
-	t.Run("ExchangeOfflineExitAndClaim", func(t *testing.T) { ethOffline(newHarness(t, "eth")) })
-	t.Run("ReversalAttack", func(t *testing.T) { ethReversal(newHarness(t, "eth")) })
-	t.Run("MaliciousOldStateWatchtowerOn", func(t *testing.T) { ethMalicious(newHarness(t, "eth"), true) })
-	t.Run("MaliciousOldStateWatchtowerOff", func(t *testing.T) { ethMalicious(newHarness(t, "eth"), false) })
-	t.Run("TheftRefused", func(t *testing.T) { ethTheft(newHarness(t, "eth")) })
-	t.Run("BuyingCapacity", func(t *testing.T) { ethCapacity(newHarness(t, "eth")) })
-	t.Run("WatchtowerKeepsBoughtETH", func(t *testing.T) { ethCapacityExit(newHarness(t, "eth")) })
-	t.Run("OldStateCantSettle", func(t *testing.T) { ethOldStateCantSettle(newHarness(t, "eth")) })
+func TestEthereum(t *testing.T)  { runEVMScenarios(t, "eth") }
+func TestPolygon(t *testing.T)   { runEVMScenarios(t, "pol") }
+func TestBase(t *testing.T)      { runEVMScenarios(t, "base") }
+func TestBNBChain(t *testing.T)  { runEVMScenarios(t, "bnb") }
+func TestAvalanche(t *testing.T) { runEVMScenarios(t, "avax") }
+
+func runEVMScenarios(t *testing.T, chain string) {
+	t.Run("NormalTradeAndSettle", func(t *testing.T) { ethNormal(newHarness(t, chain)) })
+	t.Run("ExchangeOfflineExitAndClaim", func(t *testing.T) { ethOffline(newHarness(t, chain)) })
+	t.Run("ReversalAttack", func(t *testing.T) { ethReversal(newHarness(t, chain)) })
+	t.Run("MaliciousOldStateWatchtowerOn", func(t *testing.T) { ethMalicious(newHarness(t, chain), true) })
+	t.Run("MaliciousOldStateWatchtowerOff", func(t *testing.T) { ethMalicious(newHarness(t, chain), false) })
+	t.Run("TheftRefused", func(t *testing.T) { ethTheft(newHarness(t, chain)) })
+	t.Run("BuyingCapacity", func(t *testing.T) { ethCapacity(newHarness(t, chain)) })
+	t.Run("WatchtowerKeepsBoughtCoins", func(t *testing.T) { ethCapacityExit(newHarness(t, chain)) })
+	t.Run("OldStateCantSettle", func(t *testing.T) { ethOldStateCantSettle(newHarness(t, chain)) })
 }
 
 func ethLock(h *harness) {
@@ -387,9 +406,9 @@ func ethLock(h *harness) {
 func (h *harness) ethWithin(what string, got, want int64) {
 	h.t.Helper()
 	if got > want || got < want-ethGas {
-		h.t.Fatalf("%s: got %s, want %s minus gas (at most %s)", what, fmtCoin(got, "ETH"), fmtCoin(want, "ETH"), fmtCoin(ethGas, "ETH"))
+		h.t.Fatalf("%s: got %s, want %s minus gas (at most %s)", what, fmtCoin(got, h.e.Info().Ticker), fmtCoin(want, h.e.Info().Ticker), fmtCoin(ethGas, h.e.Info().Ticker))
 	}
-	h.t.Logf("%s: %s (expected %s minus gas)", what, fmtCoin(got, "ETH"), fmtCoin(want, "ETH"))
+	h.t.Logf("%s: %s (expected %s minus gas)", what, fmtCoin(got, h.e.Info().Ticker), fmtCoin(want, h.e.Info().Ticker))
 }
 
 func ethNormal(h *harness) {
@@ -506,7 +525,7 @@ func ethFundCapacityAndBuy(h *harness) {
 	}
 	h.order("buy", 80_000_000)
 	if u := h.vault().UserSats; u != 179_800_000 {
-		h.t.Fatalf("your share after buying: %s, want 1.798", fmtCoin(u, "ETH"))
+		h.t.Fatalf("your share after buying: %s, want 1.798", fmtCoin(u, h.e.Info().Ticker))
 	}
 }
 

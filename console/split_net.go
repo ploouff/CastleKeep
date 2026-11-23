@@ -23,7 +23,8 @@ import (
 // ------------------------------------------------------------------ chain
 
 type chainConn struct {
-	rpc *rpcclient.Client
+	rpc    *rpcclient.Client
+	tagged string // cached tag()
 }
 
 func dialChain(addr string) (*chainConn, error) {
@@ -110,6 +111,7 @@ type OpenKeysResp struct {
 	VaultID          string
 	ExchPub, ExchPay []byte
 	Delay, D2        int64
+	Anchors          bool // the exit request has a small output for each side, to speed it up (fees.go)
 }
 type OpenStartReq struct {
 	VaultID string
@@ -244,3 +246,14 @@ func call(base, path string, req, resp any) error {
 var errNoVault = errors.New("no such vault")
 
 type empty struct{}
+
+// tag tells one test chain from another (the hash of block 1), so a saved
+// file isn't used on a chain that was started fresh.
+func (c *chainConn) tag() string {
+	if c.tagged == "" {
+		if h, err := c.rpc.GetBlockHash(1); err == nil {
+			c.tagged = h.String()
+		}
+	}
+	return c.tagged
+}

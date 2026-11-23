@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/txscript"
@@ -20,14 +21,15 @@ import (
 )
 
 type xChain struct {
-	id    string
-	cfg   UTXOConfig
-	c     *chainConn
-	key   *btcec.PrivateKey // the exchange's wallet key
-	pay   []byte
-	coins []utxo
-	price int64
-	mode  string // honest, offline, malicious
+	id       string
+	cfg      UTXOConfig
+	c        *chainConn
+	key      *btcec.PrivateKey // the exchange's wallet key
+	pay      []byte
+	coins    []utxo
+	price    int64
+	mode     string    // honest, offline, malicious
+	lastScan time.Time // signet: last look for coins sent to the exchange
 }
 
 type xVault struct {
@@ -66,15 +68,19 @@ type xPending struct {
 
 // Exchange is the exchange server's state.
 type Exchange struct {
-	mu        sync.Mutex
-	chains    map[string]*xChain
-	vaults    map[string]*xVault
-	cash      map[string]int64 // account -> cents
-	tamper    bool             // tests only: corrupt the next signature sent to the wallet
-	eth       *xEth
-	ethVaults map[string]*xEthVault
-	books     map[string]*book
-	orderSeq  int
+	mu       sync.Mutex
+	chains   map[string]*xChain
+	vaults   map[string]*xVault
+	cash     map[string]int64 // account -> cents
+	tamper   bool             // tests only: corrupt the next signature sent to the wallet
+	evm      map[string]*xEth // EVM chains by ID (eth, pol, base, bnb, avax)
+	books    map[string]*book
+	orderSeq int
+
+	// saving (split_save.go)
+	file, saveErr string
+	lastSaved     []byte
+	seal          *sealKey // password for the file (seal.go); nil: plain text
 }
 
 // NewExchange connects to each chain's node. rpc maps chain id to the
@@ -131,7 +137,13 @@ func (x *Exchange) Handler() http.Handler {
 	m.Handle("/v1/info", handle(x.info))
 	m.Handle("/v1/state", handle(x.state))
 	m.Handle("/v1/tick", handle(func(empty) (empty, error) { x.Tick(); return empty{}, nil }))
-	return m
+	// Save after every request (only writes when something changed).
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.ServeHTTP(w, r)
+		x.mu.Lock()
+		x.save()
+		x.mu.Unlock()
+	})
 }
 
 func (v *xVault) log(f string, a ...any) { v.events = append(v.events, fmt.Sprintf(f, a...)) }
@@ -169,9 +181,10 @@ func (x *Exchange) openKeys(r OpenKeysReq) (OpenKeysResp, error) {
 	if err != nil {
 		return OpenKeysResp{}, userErr("%v", err)
 	}
+	def.anchors = true
 	v := &xVault{id: newID(), account: r.Account, chain: r.Chain, key: k, def: def}
 	x.vaults[v.id] = v
-	return OpenKeysResp{VaultID: v.id, ExchPub: xonly(k), ExchPay: xc.pay, Delay: def.delay, D2: def.d2}, nil
+	return OpenKeysResp{VaultID: v.id, ExchPub: xonly(k), ExchPay: xc.pay, Delay: def.delay, D2: def.d2, Anchors: def.anchors}, nil
 }
 
 func (x *Exchange) openStart(r OpenStartReq) (OpenStartResp, error) {
@@ -370,16 +383,16 @@ func (x *Exchange) addCash(r CashReq) (CashResp, error) {
 func (x *Exchange) admin(r AdminReq) (empty, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if r.Chain == "eth" && x.eth != nil {
+	if xe := x.evm[r.Chain]; xe != nil {
 		switch r.Mode {
 		case "":
 		case "honest", "offline", "malicious":
-			x.eth.mode = r.Mode
+			xe.mode = r.Mode
 		default:
 			return empty{}, userErr("Unknown mode.")
 		}
 		if r.USD > 0 {
-			x.eth.price = r.USD
+			xe.price = r.USD
 		}
 		return empty{}, nil
 	}
@@ -539,12 +552,16 @@ func (x *Exchange) capacityFinish(r CapacityFinishReq) (CommitResp, error) {
 func (x *Exchange) Tick() {
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	for _, xc := range x.chains {
+		x.scan(xc)
+	}
 	for _, v := range x.vaults {
 		if v.opened && len(v.gens) > 0 {
 			x.watch(v, x.chains[v.chain])
 		}
 	}
 	x.ethTick()
+	x.save()
 }
 
 func (x *Exchange) watch(v *xVault, xc *xChain) {
