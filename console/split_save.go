@@ -87,6 +87,7 @@ func utxoLoad(rs []utxoRec) []utxo {
 type defRec struct {
 	User, Exch, UserPay, ExchPay []byte
 	Delay, D2                    int64
+	Anchors                      bool `json:",omitempty"`
 }
 
 type genRec struct {
@@ -111,7 +112,7 @@ type vaultRec struct {
 }
 
 func saveVault(d *vaultDef, gens []*vgen, states []*pstate) vaultRec {
-	r := vaultRec{Def: defRec{d.user, d.exch, d.userPay, d.exchPay, d.delay, d.d2}}
+	r := vaultRec{Def: defRec{d.user, d.exch, d.userPay, d.exchPay, d.delay, d.d2, d.anchors}}
 	for _, g := range gens {
 		r.Gens = append(r.Gens, genRec{g.vaultOut, g.vaultAmt, g.userDep, g.exchDep, g.exitSigU, g.exitSigX, g.refundSigU, g.refundSigX})
 	}
@@ -128,6 +129,7 @@ func (r vaultRec) load() (*vaultDef, []*vgen, []*pstate, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	d.anchors = r.Def.Anchors
 	var gens []*vgen
 	for _, gr := range r.Gens {
 		g := d.buildGen(gr.Out, gr.Amt, gr.UserDep, gr.ExchDep)
@@ -250,6 +252,7 @@ type xEthRec struct {
 	Contract string // the vaults below only make sense on this contract
 	Price    int64
 	Mode     string
+	Vaults   []xEthVaultRec
 }
 
 type xEthVaultRec struct {
@@ -292,7 +295,8 @@ type xSave struct {
 	Chains    map[string]xChainRec
 	Vaults    []xVaultRec
 	Cash      map[string]int64
-	Eth       *xEthRec
+	EVM       map[string]*xEthRec // eth, pol, base, bnb, avax
+	Eth       *xEthRec            // files saved before the other EVM chains: Ethereum only
 	EthVaults []xEthVaultRec
 	Books     map[string]bookRec
 	OrderSeq  int
@@ -316,7 +320,10 @@ func (x *Exchange) save() {
 		return
 	}
 	if err == nil {
-		err = writeFile(x.file, data)
+		var out []byte
+		if out, err = sealIfSet(x.seal, data); err == nil {
+			err = writeFile(x.file, out)
+		}
 	}
 	if err != nil {
 		if msg := err.Error(); msg != x.saveErr {
@@ -341,13 +348,17 @@ func (x *Exchange) record() xSave {
 			Closed: v.closed, SweepKind: v.sweepKind, Events: v.events})
 	}
 	sortBy(s.Vaults, func(v xVaultRec) string { return v.ID })
-	if x.eth != nil {
-		s.Eth = &xEthRec{keyRec(x.eth.key), x.eth.c.contract, x.eth.price, x.eth.mode}
-		for _, v := range x.ethVaults {
-			s.EthVaults = append(s.EthVaults, xEthVaultRec{v.id.String(), v.account, v.user, ethStateRecs(v.states), v.fundTx, v.fundAmt,
+	for id, xe := range x.evm {
+		er := &xEthRec{Key: keyRec(xe.key), Contract: xe.c.contract, Price: xe.price, Mode: xe.mode}
+		for _, v := range xe.vaults {
+			er.Vaults = append(er.Vaults, xEthVaultRec{v.id.String(), v.account, v.user, ethStateRecs(v.states), v.fundTx, v.fundAmt,
 				v.settling, v.exchLast, v.exchPend, v.closed, v.events})
 		}
-		sortBy(s.EthVaults, func(v xEthVaultRec) string { return fmt.Sprintf("%020s", v.ID) })
+		sortBy(er.Vaults, func(v xEthVaultRec) string { return fmt.Sprintf("%020s", v.ID) })
+		if s.EVM == nil {
+			s.EVM = map[string]*xEthRec{}
+		}
+		s.EVM[id] = er
 	}
 	for chain, b := range x.books {
 		br := bookRec{Trades: b.trades, Seq: b.seq, Orders: []orderRec{}, Legs: []legRec{}}
@@ -365,7 +376,7 @@ func (x *Exchange) record() xSave {
 // Load reads a saved exchange. Call it after NewExchange and AttachEth and
 // before serving anything. It reports whether there was a file to load.
 func (x *Exchange) Load(path string) (bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := readSaved(path, x.seal)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -421,24 +432,32 @@ func (x *Exchange) Load(path string) (bool, error) {
 	if s.Cash != nil {
 		x.cash = s.Cash
 	}
-	if s.Eth != nil && x.eth != nil {
-		k, err := s.Eth.Key.key()
+	if s.EVM == nil && s.Eth != nil {
+		s.Eth.Vaults = s.EthVaults
+		s.EVM = map[string]*xEthRec{"eth": s.Eth}
+	}
+	for chain, er := range s.EVM {
+		xe := x.evm[chain]
+		if xe == nil {
+			continue
+		}
+		k, err := er.Key.key()
 		if err != nil {
 			return false, err
 		}
-		x.eth.key, x.eth.addr, x.eth.price, x.eth.mode = k, ethAddress(k), s.Eth.Price, s.Eth.Mode
-		if strings.EqualFold(s.Eth.Contract, x.eth.c.contract) {
-			for _, vr := range s.EthVaults {
+		xe.key, xe.addr, xe.price, xe.mode = k, ethAddress(k), er.Price, er.Mode
+		if strings.EqualFold(er.Contract, xe.c.contract) {
+			for _, vr := range er.Vaults {
 				id, ok := new(big.Int).SetString(vr.ID, 10)
 				if !ok {
 					continue
 				}
-				x.ethVaults[vr.ID] = &xEthVault{id: id, account: vr.Account, user: vr.User, states: ethStatesLoad(vr.States),
+				xe.vaults[vr.ID] = &xEthVault{id: id, account: vr.Account, user: vr.User, states: ethStatesLoad(vr.States),
 					fundTx: vr.FundTx, fundAmt: vr.FundAmt, settling: vr.Settling, exchLast: vr.ExchLast, exchPend: vr.ExchPend,
 					closed: vr.Closed, events: vr.Events}
 			}
-		} else if len(s.EthVaults) > 0 {
-			fmt.Println("The Ethereum node was restarted (new contract), so the saved Ethereum vaults are gone with it.")
+		} else if len(er.Vaults) > 0 {
+			fmt.Printf("The %s test node was restarted (new contract), so the saved %s vaults are gone with it.\n", xe.ticker, xe.ticker)
 		}
 	}
 	x.books = map[string]*book{}
@@ -514,7 +533,8 @@ type wSave struct {
 	Account, Name string
 	WT            bool
 	Chains        map[string]wChainRec
-	Eth           *wEthRec
+	EVM           map[string]*wEthRec // eth, pol, base, bnb, avax
+	Eth           *wEthRec            // files saved before the other EVM chains: Ethereum only
 	Orders        []wOrder
 }
 
@@ -542,7 +562,10 @@ func (w *Wallet) save() {
 		return
 	}
 	if err == nil {
-		err = writeFile(w.file, data)
+		var out []byte
+		if out, err = sealIfSet(w.seal, data); err == nil {
+			err = writeFile(w.file, out)
+		}
 	}
 	if err != nil {
 		if msg := err.Error(); msg != w.saveErr {
@@ -566,13 +589,16 @@ func (w *Wallet) record() wSave {
 		}
 		s.Chains[id] = cr
 	}
-	if we := w.eth; we != nil {
+	for id, we := range w.evm {
 		er := &wEthRec{Key: keyRec(we.key), Contract: we.c.contract, ExchAddr: we.exchAddr}
 		if v := we.vault; v != nil {
 			er.Vault = &wEthVaultRec{v.id.String(), ethStateRecs(v.states), v.openTx, v.exitTx, v.closeTx, v.closed,
 				v.capPending, v.capSats, v.userLast, v.userPend, v.exchFault, v.Events}
 		}
-		s.Eth = er
+		if s.EVM == nil {
+			s.EVM = map[string]*wEthRec{}
+		}
+		s.EVM[id] = er
 	}
 	for _, o := range w.orders {
 		s.Orders = append(s.Orders, *o)
@@ -584,7 +610,7 @@ func (w *Wallet) record() wSave {
 // Load reads a saved wallet. Call it after NewWallet and AttachEth, before
 // using the wallet. It reports whether there was a file to load.
 func (w *Wallet) Load(path string) (bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := readSaved(path, w.seal)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -639,20 +665,27 @@ func (w *Wallet) Load(path string) (bool, error) {
 		}
 		wc.vault = v
 	}
-	if s.Eth != nil && w.eth != nil {
-		k, err := s.Eth.Key.key()
+	if s.EVM == nil && s.Eth != nil {
+		s.EVM = map[string]*wEthRec{"eth": s.Eth}
+	}
+	for chain, er := range s.EVM {
+		we := w.evm[chain]
+		if we == nil {
+			continue
+		}
+		k, err := er.Key.key()
 		if err != nil {
 			return false, err
 		}
-		w.eth.key, w.eth.addr, w.eth.exchAddr, w.eth.vault = k, ethAddress(k), s.Eth.ExchAddr, nil
-		if vr := s.Eth.Vault; vr != nil {
+		we.key, we.addr, we.exchAddr, we.vault = k, ethAddress(k), er.ExchAddr, nil
+		if vr := er.Vault; vr != nil {
 			id, ok := new(big.Int).SetString(vr.ID, 10)
-			if ok && strings.EqualFold(s.Eth.Contract, w.eth.c.contract) {
-				w.eth.vault = &wEthVault{id: id, states: ethStatesLoad(vr.States), openTx: vr.OpenTx, exitTx: vr.ExitTx,
+			if ok && strings.EqualFold(er.Contract, we.c.contract) {
+				we.vault = &wEthVault{id: id, states: ethStatesLoad(vr.States), openTx: vr.OpenTx, exitTx: vr.ExitTx,
 					closeTx: vr.CloseTx, closed: vr.Closed, capPending: vr.CapPending, capSats: vr.CapSats,
 					userLast: vr.UserLast, userPend: vr.UserPend, exchFault: vr.ExchFault, Events: vr.Events}
 			} else if ok {
-				fmt.Println("The Ethereum node was restarted (new contract), so your saved Ethereum vault is gone with it.")
+				fmt.Printf("The %s test node was restarted (new contract), so your saved %s vault is gone with it.\n", we.ticker, we.ticker)
 			}
 		}
 	}

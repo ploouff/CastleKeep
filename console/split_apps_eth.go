@@ -24,13 +24,17 @@ func ethNodeUp(url string) bool {
 	return json.NewDecoder(r.Body).Decode(&out) == nil && out.Result != ""
 }
 
-// ethAdminView adds Ethereum to the admin page's data (x.mu held).
+// ethAdminView adds the EVM chains to the admin page's data (x.mu held).
 func (x *Exchange) ethAdminView(out *XStateResp) {
-	if x.eth == nil {
-		return
+	for _, xe := range x.evm {
+		x.evmAdminView(xe, out)
 	}
-	out.Chains = append(out.Chains, XChainView{"eth", "ETH", x.eth.mode, x.eth.price, fromWei(x.eth.c.balance(x.eth.addr)), ""})
-	for id, v := range x.ethVaults {
+	sort.Slice(out.Vaults, func(i, j int) bool { return out.Vaults[i].ID < out.Vaults[j].ID })
+}
+
+func (x *Exchange) evmAdminView(xe *xEth, out *XStateResp) {
+	out.Chains = append(out.Chains, XChainView{xe.id, xe.ticker, xe.mode, xe.price, fromWei(xe.c.balance(xe.addr)), "", evmName(xe.id), evmColor(xe.id), evmBadge(xe.id)})
+	for id, v := range xe.vaults {
 		if len(v.states) == 0 {
 			continue
 		}
@@ -41,14 +45,14 @@ func (x *Exchange) ethAdminView(out *XStateResp) {
 			st = "settling"
 		}
 		l := v.latest()
-		out.Vaults = append(out.Vaults, XVaultView{"eth-" + id, v.account, "eth", st, l.UserSats, l.ExchSats, len(v.states), v.events})
+		out.Vaults = append(out.Vaults, XVaultView{xe.id + "-" + id, v.account, xe.id, st, l.UserSats, l.ExchSats, len(v.states), v.events})
 	}
-	sort.Slice(out.Vaults, func(i, j int) bool { return out.Vaults[i].ID < out.Vaults[j].ID })
 }
 
 // walletEthEngine lets the usual page drive the wallet's Ethereum.
 type walletEthEngine struct {
 	w            *Wallet
+	id           string // eth, pol, base, bnb or avax
 	info         ChainInfo
 	chains, exch string
 	eventLog
@@ -67,49 +71,49 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 	ok := ""
 	switch r.Action {
 	case "faucet":
-		if err = call(e.chains, "/faucet", FaucetReq{Chain: "eth", Addr: w.eth.addr, Sats: unit}, nil); err == nil {
-			ok = "Received 1 test ETH"
+		if err = call(e.chains, "/faucet", FaucetReq{Chain: e.id, Addr: w.evm[e.id].addr, Sats: unit}, nil); err == nil {
+			ok = "Received 1 test " + e.info.Ticker
 		}
 	case "mine":
-		if err = call(e.chains, "/mine", MineReq{Chain: "eth", N: r.N, Secs: r.Secs}, nil); err == nil {
+		if err = call(e.chains, "/mine", MineReq{Chain: e.id, N: r.N, Secs: r.Secs}, nil); err == nil {
 			call(e.exch, "/v1/tick", empty{}, nil)
 			w.Tick()
-			ok = "Moved the Ethereum test chain forward"
+			ok = "Moved the " + e.info.Name + " test chain forward"
 		}
 	case "lock":
-		if err = w.EthOpen(r.Sats); err == nil {
-			ok = "Locked " + fmtCoin(r.Sats, "ETH") + ". Mine a block; your wallet then agrees state #0 with the exchange"
+		if err = w.EthOpen(e.id, r.Sats); err == nil {
+			ok = "Locked " + fmtCoin(r.Sats, e.info.Ticker) + ". Mine a block; your wallet then agrees state #0 with the exchange"
 		}
 	case "order":
-		if err = w.EthOrder(r.Side, r.Sats); err == nil {
-			ok = "Order filled: " + r.Side + " " + fmtCoin(r.Sats, "ETH") + ". Both signatures checked"
+		if err = w.EthOrder(e.id, r.Side, r.Sats); err == nil {
+			ok = "Order filled: " + r.Side + " " + fmtCoin(r.Sats, e.info.Ticker) + ". Both signatures checked"
 		}
 	case "settle":
-		if err = w.EthSettle(); err == nil {
+		if err = w.EthSettle(e.id); err == nil {
 			ok = "Settled: both signed the settle message for the latest state"
 		}
 	case "exit":
-		if err = w.EthExit(); err == nil {
+		if err = w.EthExit(e.id); err == nil {
 			ok = "You requested an exit"
 		}
 	case "claim":
-		if err = w.EthClaim(); err == nil {
+		if err = w.EthClaim(e.id); err == nil {
 			ok = "Paid out after the window"
 		}
 	case "capacity":
-		if err = w.EthCapacity(r.Sats); err == nil {
-			ok = "The exchange is locking " + fmtCoin(r.Sats, "ETH") + ". Mine a block to confirm it"
+		if err = w.EthCapacity(e.id, r.Sats); err == nil {
+			ok = "The exchange is locking " + fmtCoin(r.Sats, e.info.Ticker) + ". Mine a block to confirm it"
 		}
 	case "cash":
 		if _, err = w.AddCash(); err == nil {
 			ok = "Added $10,000 of test cash on the exchange"
 		}
 	case "mode":
-		if err = w.Admin("eth", r.Mode, 0); err == nil {
+		if err = w.Admin(e.id, r.Mode, 0); err == nil {
 			ok = "Exchange is now " + r.Mode
 		}
 	case "price":
-		err = w.Admin("eth", "", r.USD)
+		err = w.Admin(e.id, "", r.USD)
 	case "watchtower":
 		w.mu.Lock()
 		w.WT = r.On
@@ -119,11 +123,11 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 		err = userErr("In the separate programs the exchange's keys live in the exchange server, so the wallet can't make it try. The one-program console has this demo.")
 	default:
 		var handled bool
-		if ok, err, handled = w.bookAction("eth", e.info.Ticker, r); !handled {
+		if ok, err, handled = w.bookAction(e.id, e.info.Ticker, r); !handled {
 			err = userErr("Unknown action.")
 		}
 	}
-	h := e.w.eth.c.height()
+	h := e.w.evm[e.id].c.height()
 	if err != nil {
 		e.add(h, "bad", "Refused", err.Error(), "")
 		return err
@@ -137,7 +141,7 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 func (e *walletEthEngine) Snapshot() Snapshot {
 	s := Snapshot{Chain: e.info, Available: true, Ready: true, Progress: "Ready", Watchtower: e.w.WT, HasUserWT: true, Txs: []*TxInfo{}}
 	var info InfoResp
-	if err := call(e.exch, "/v1/info", InfoReq{"eth"}, &info); err == nil {
+	if err := call(e.exch, "/v1/info", InfoReq{e.id}, &info); err == nil {
 		s.Price, s.Mode = info.Price, info.Mode
 	} else {
 		s.Mode = "offline"
@@ -146,10 +150,10 @@ func (e *walletEthEngine) Snapshot() Snapshot {
 	if call(e.exch, "/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
 		s.CashCents = cr.CashCents
 	}
-	s.Who, s.Book = e.w.Name, e.w.bookSnapshot("eth")
+	s.Who, s.Book = e.w.Name, e.w.bookSnapshot(e.id)
 	e.w.mu.Lock()
 	defer e.w.mu.Unlock()
-	we := e.w.eth
+	we := e.w.evm[e.id]
 	c := we.c
 	s.Height = c.height()
 	now := c.chainTime()

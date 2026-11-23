@@ -1,6 +1,6 @@
 # Castlekeep
 
-**Trade crypto on an exchange without the exchange ever holding your coins.** Working on Bitcoin, Litecoin and Ethereum test chains, with a Solana design.
+**Trade crypto on an exchange without the exchange ever holding your coins.** Working on Bitcoin, Litecoin, Ethereum, Polygon, Base, BNB Chain and Avalanche test chains, with a Solana design.
 
 Castlekeep is a prototype for self-custodial exchange settlement. Instead of depositing
 BTC into an exchange's wallet, you lock it into a Bitcoin vault that needs **both your key
@@ -57,7 +57,7 @@ Exit output    (reached by an exit request both sides pre-sign when the vault op
 
 | Folder | What it is |
 | --- | --- |
-| [`console/`](console/) | A clickable web app for **Bitcoin, Litecoin and Ethereum**. Lock, trade, settle, exit, move the chain forward and switch the exchange between honest, offline and malicious. **Start here.** |
+| [`console/`](console/) | A clickable web app for **Bitcoin, Litecoin, Ethereum, Polygon, Base, BNB Chain and Avalanche**. Lock, trade, settle, exit, move the chain forward and switch the exchange between honest, offline and malicious. **Start here.** |
 | [`console/contract/`](console/contract/) | `CastleVault.sol`, the Ethereum smart contract. |
 | [`prototype/`](prototype/) | The original Bitcoin command-line version that runs four scenarios and checks every result. |
 | [`solana/`](solana/) | A Solana design and draft program (not yet compiled or tested), plus notes on other coins. |
@@ -72,10 +72,11 @@ running the contract), not from the app's own logic.
 | Bitcoin | Taproot 2-of-2 script with a 144-block timelock, plus exchange coins added by a splice so you can buy new BTC | Two-way revocation secrets: whoever publishes an old state loses their share of it |
 | Litecoin | The same Taproot scripts, 576-block timelock | Same revocation design as Bitcoin |
 | Ethereum | Smart contract where only a newer signed state can replace an older one, plus exchange-funded buying | **Closed** |
+| Polygon, Base, BNB Chain, Avalanche | The same contract as Ethereum, each on its own local test chain | **Closed** |
 | Solana | Program design following the Ethereum model | Design only |
 
-All chains share **one test account**: a bar at the top of the console shows your BTC, LTC
-and ETH (wallet plus vault share), one cash balance and the total value. You can also
+All chains share **one test account**: a bar at the top of the console shows every coin
+(wallet plus vault share), one cash balance and the total value. You can also
 **swap** one coin for another in a single order: the exchange signs the new state for the
 coin you buy first, then you sign the sale. It is two vault states on two chains, not one
 transaction (and not a hash-locked "atomic swap"), so each side is protected by its own
@@ -118,8 +119,10 @@ This is a proof of concept, not a product.
 - **Only the coins are self-custodied.** The shared cash balance sits with the exchange as normal.
 - **Flat fees**, no fee bumping. The order book between users exists only in the separate
   programs and has no trading fee.
-- **Saved data is plain text.** The separate programs save keys and revocation secrets
-  unencrypted in `castlekeep-data`, which is only acceptable for test coins.
+- **Saved data is plain text unless you ask for a password.** The separate programs save keys
+  and revocation secrets in `castlekeep-data`. With `-password` the exchange's and each
+  wallet's file is encrypted (scrypt and AES-256-GCM). That keeps test keys out of plain sight
+  on disk; it is not a substitute for a real wallet's key storage.
 
 ## Roadmap
 
@@ -133,10 +136,12 @@ This is a proof of concept, not a product.
 - [x] Order book between several users (separate programs)
 - [x] Save the exchange, wallets and test chains between runs
 - [ ] Compile and test the Solana program
-- [ ] Deploy the Ethereum contract to EVM networks (Polygon, Arbitrum, Base)
+- [x] Polygon, Base, BNB Chain and Avalanche (the Ethereum contract on local test chains)
+- [ ] Deploy the contract to public EVM test networks (Sepolia, Amoy, Base Sepolia, BNB testnet, Fuji)
 - [x] Run on signet, Bitcoin's public test network (separate programs, Bitcoin only)
 - [ ] MuSig2 key-path settlements (cheaper and more private)
-- [ ] Real fee estimation and fee bumping
+- [x] Fee bumping (child pays for parent, anchor outputs on the exit request; separate programs)
+- [ ] Real fee estimation (btcd usually has no estimate; a minimum rate is used)
 - [ ] Lightning-channel version for near-instant deposits and withdrawals
 
 ## Feedback

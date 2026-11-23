@@ -32,6 +32,7 @@ type vaultDef struct {
 	user, exch       []byte // x-only public keys
 	userPay, exchPay []byte // where each side's coins are paid
 	delay, d2        int64
+	anchors          bool // exit requests carry an anchor output for each side (vaults opened since fees.go)
 	ms, dl           txscript.TapLeaf
 	V, E             *tapOutput
 }
@@ -80,7 +81,16 @@ func (d *vaultDef) buildGen(out wire.OutPoint, amt, userDep, exchDep int64) *vge
 	g.exitTx = wire.NewMsgTx(2)
 	g.exitTx.AddTxIn(wire.NewTxIn(&out, nil, nil))
 	g.exitAmt = amt - txFee
+	if d.anchors {
+		g.exitAmt -= 2 * anchorAmt
+	}
 	g.exitTx.AddTxOut(wire.NewTxOut(g.exitAmt, d.E.pkScript))
+	if d.anchors {
+		// One small output for each side, so either can speed the exit
+		// request up with a child transaction (child pays for parent).
+		g.exitTx.AddTxOut(wire.NewTxOut(anchorAmt, d.userPay))
+		g.exitTx.AddTxOut(wire.NewTxOut(anchorAmt, d.exchPay))
+	}
 	g.refundTx, _, _, _, _ = splitPayout(g.exitOut(), g.exitAmt, userDep, exchDep, d.userPay, d.exchPay)
 	g.refundTx.TxIn[0].Sequence = uint32(d.delay)
 	return g

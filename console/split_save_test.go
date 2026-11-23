@@ -16,6 +16,7 @@ import (
 func TestSaveBitcoin(t *testing.T)  { runSave(t, "btc") }
 func TestSaveLitecoin(t *testing.T) { runSave(t, "ltc") }
 func TestSaveEthereum(t *testing.T) { runSave(t, "eth") }
+func TestSaveBase(t *testing.T)     { runSave(t, "base") }
 
 // restart builds a new exchange and new wallets from the saved files, the way
 // the programs do when they start again, and points the test at them.
@@ -24,8 +25,8 @@ func (e *bookEnv) restart(dir string, owner *testing.T) {
 	t.Helper()
 	cfgs, rpc := map[string]UTXOConfig{}, map[string]string{}
 	var ee *EthEngine
-	if e.chain == "eth" {
-		ee = engine(t, "eth").(*EthEngine)
+	if isEVM(e.chain) {
+		ee = engine(t, e.chain).(*EthEngine)
 	} else {
 		ue := engine(t, e.chain).(*UTXOEngine)
 		cfgs[e.chain], rpc[e.chain] = ue.cfg, ue.RPCAddr()
@@ -33,7 +34,7 @@ func (e *bookEnv) restart(dir string, owner *testing.T) {
 	x, err := NewExchange(cfgs, rpc)
 	e.ok(err)
 	if ee != nil {
-		x.AttachEth(ee.Endpoint(), ee.cfg.DefaultPrice)
+		x.AttachEVM(e.chain, ee.Endpoint(), ee.cfg.DefaultPrice)
 	}
 	loaded, err := x.Load(filepath.Join(dir, "exchange.json"))
 	e.ok(err)
@@ -50,7 +51,7 @@ func (e *bookEnv) restart(dir string, owner *testing.T) {
 		nw, err := NewWallet(srv.URL, cfgs, rpc)
 		e.ok(err)
 		if ee != nil {
-			nw.AttachEth(ee.Endpoint())
+			nw.AttachEVM(e.chain, ee.Endpoint())
 		}
 		loaded, err := nw.Load(filepath.Join(dir, p.name+".json"))
 		e.ok(err)
@@ -92,8 +93,8 @@ func runSave(t *testing.T, chain string) {
 
 	// Before the restart: Alice sells some straight to the exchange, then
 	// puts a sell order in the book that nobody has matched yet.
-	if chain == "eth" {
-		e.ok(e.alice.EthOrder("sell", 10_000_000))
+	if isEVM(chain) {
+		e.ok(e.alice.EthOrder(e.chain, "sell", 10_000_000))
 	} else {
 		e.ok(e.alice.Order(chain, "sell", 10_000_000))
 	}
@@ -126,12 +127,12 @@ func runSave(t *testing.T, chain string) {
 		e.restart(dir, root) // a second restart, after the fill, must load cleanly too
 	})
 
-	if chain == "eth" {
+	if isEVM(chain) {
 		t.Run("SettleAfterRestart", func(t *testing.T) {
 			e.t = t
-			e.ok(e.alice.EthSettle())
+			e.ok(e.alice.EthSettle(e.chain))
 			e.mine()
-			if _, _, _, closed := e.alice.EthVault(); closed != "settled" {
+			if _, _, _, closed := e.alice.EthVault(e.chain); closed != "settled" {
 				t.Fatalf("Alice's vault: %q", closed)
 			}
 		})

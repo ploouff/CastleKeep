@@ -6,31 +6,32 @@ All commands are for PowerShell or Command Prompt on Windows, run from the folde
 
 ## A. The automatic tests
 
-1. Make sure Hardhat is running in its own window (needed for the Ethereum tests):
-   ```
-   cd %USERPROFILE%\castlekeep-eth
-   npx.cmd hardhat node
-   ```
-2. In another window:
+1. Hardhat must be installed in `%USERPROFILE%\castlekeep-eth` (see `console\README.md`). The
+   tests start their own Hardhat node for each EVM chain (Ethereum, Polygon, Base, BNB Chain,
+   Avalanche) and stop them at the end. If a Hardhat node is already running at
+   `http://127.0.0.1:8545`, the Ethereum tests use that one instead.
+2. In a Command Prompt window:
    ```
    cd console
    go test -v -timeout 30m
    ```
-3. It takes about 20 seconds. The last lines should say `PASS` and `ok castlekeep-console`.
+3. It takes under a minute. The last lines should say `PASS` and `ok castlekeep-console`.
    Every `--- PASS` line is one scenario; a `--- FAIL` line is followed by what was expected
    and what happened.
 
-Stop any console that uses the same Hardhat node first (Ctrl+C): both mine blocks and move
-Hardhat's clock. Without Hardhat, the Ethereum tests are skipped with a message.
+If you use your own Hardhat node at 8545, stop any console that uses it first (Ctrl+C): both
+mine blocks and move its clock. Without Hardhat, the EVM tests are skipped with a message.
 
 ## B. The one-program console
 
 ```
 cd console
-go run . -eth-rpc http://127.0.0.1:8545
+go run .
 ```
 
-The page opens at `http://127.0.0.1:8080`. Wait for the green dots on the tabs.
+The page opens at `http://127.0.0.1:8080`, with a tab for each coin. Wait for the green dots
+on the tabs. (It starts its own Hardhat node for each EVM chain. Add `-chains btc,ltc,eth` to
+run fewer chains.)
 
 **Buy new BTC.** On the Bitcoin tab: lock `1`, Mine 1 block. In the vault's "Buy more than
 you sell" box click **Ask the exchange to lock BTC**, Mine 1 block. Click **Add $10,000 test
@@ -53,13 +54,14 @@ after the window**). You get the whole vault back.
 
 ## C. The separate programs
 
-Three windows, in this order (start Hardhat first to include Ethereum):
+Three windows, in this order. The chains program starts its own Hardhat node for each EVM
+chain, so you don't need a Hardhat window:
 
 ```
 cd console
 go run . chains
 ```
-Wait about a minute, until it has mined its first blocks.
+Wait about a minute, until it has mined its first blocks and deployed the contracts.
 ```
 cd console
 go run . exchange
@@ -117,7 +119,8 @@ go run . wallet -name bob -port 9301
 7. The admin page's **Order books** section lists every open order by account
    (`alice-…`, `bob-…`) and the recent trades.
 
-Works the same on Litecoin and Ethereum (on Ethereum, Bob asks the exchange to lock ETH).
+Works the same on Litecoin and on every EVM chain (there, Bob asks the exchange to lock that
+chain's coin, for example AVAX).
 
 ## E. Saving and restarting
 
@@ -130,6 +133,12 @@ Works the same on Litecoin and Ethereum (on Ethereum, Bob asks the exchange to l
 5. Carry on with D step 4: Bob's buy matches Alice's saved order.
 
 To start over: add `-fresh` to all four commands. The old files are renamed, not deleted.
+
+**With a password.** Close the wallet window and start it again with `-password` added. Type
+a password twice (at least 8 characters; nothing shows as you type). Open
+`%USERPROFILE%\castlekeep-data\wallet-alice.json` in Notepad: it now starts with
+`"castlekeep": "sealed"` and shows no keys. Restart the wallet: it asks for the password, and
+a wrong one three times stops it with nothing changed.
 
 The automatic tests `TestSave…` do the same without windows: they stop the exchange and
 both wallets mid-trade, load them from their files, check nothing changed, fill the saved
@@ -152,6 +161,22 @@ saved. `TestKeptChainRestarts` stops and restarts a kept Bitcoin chain.
 
 There's no Mine button on signet: blocks come by themselves. The exit window is 144 blocks,
 about a day.
+
+## G. The other EVM chains (Polygon, Base, BNB Chain, Avalanche)
+
+They run the same contract as Ethereum, each on its own local test chain, and appear as their
+own tabs (one-program console and separate programs alike). The coin icons are simple
+coloured badges drawn by the page.
+
+1. On the Polygon tab: lock `1`, Mine 1 block, sell `0.4`. Your cash goes up by $0.40 (POL's
+   test price is $1).
+2. On the Avalanche tab: lock `1`, mine, **Ask the exchange to lock AVAX** (`1`), mine twice.
+3. On the Bitcoin tab: lock `1`, mine, then swap `0.0004` BTC **into AVAX**. The Avalanche vault
+   shows "Swapped 0.0004 BTC for 0.86666666 AVAX".
+4. Close all three windows and start them again: the chains window says `Polygon: carried on
+   from … saved steps`, and both vaults are as you left them.
+
+Base's coin is ETH too; the swap list calls it "ETH on Base" to tell it apart from Ethereum.
 
 ## What a failure looks like
 

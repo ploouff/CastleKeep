@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -72,7 +73,8 @@ func runChains(args []string) {
 	port := fs.Int("port", 9100, "port for the chains service")
 	btcd := fs.String("btcd", goBin("btcd"), "path to btcd")
 	ltcd := fs.String("ltcd", goBin("ltcd"), "path to ltcd")
-	ethRPC := fs.String("eth-rpc", "http://127.0.0.1:8545", "the Ethereum test node (Hardhat), or \"\" to leave Ethereum out")
+	ethRPC := fs.String("eth-rpc", "", "use this Ethereum node (e.g. Hardhat at http://127.0.0.1:8545) instead of starting one")
+	hardhat := fs.String("hardhat", defaultHardhatDir(), "folder with Hardhat installed, used to start the EVM test chains")
 	data := fs.String("data", "", "folder that keeps the test chains between runs (default: castlekeep-data/chains, or chains-signet)")
 	network := fs.String("network", "regtest", "regtest (private test chains) or signet (Bitcoin's public test network, Bitcoin only)")
 	fresh := fs.Bool("fresh", false, "start new test chains (the old folder is renamed, not deleted)")
@@ -115,25 +117,48 @@ func runChains(args []string) {
 	for _, e := range engines {
 		e.Start()
 	}
-	var ee *EthEngine
-	if *ethRPC != "" && ethNodeUp(*ethRPC) {
-		ec := ethConfig("", *ethRPC)
-		ethFile := filepath.Join(*data, "eth.json")
-		ec.Contract = keptContract(ethFile)
-		ee = NewEthEngine(ec)
-		ee.Start()
-		go func() {
-			// Remember the contract, so the next run uses the same one while
-			// the Ethereum node keeps running.
-			for !ee.Snapshot().Ready {
-				time.Sleep(time.Second)
+	// EVM chains: each its own Hardhat node behind a recorder, kept between
+	// runs (evm_keep.go). With -eth-rpc, Ethereum uses that node instead,
+	// keeping only the contract address as before.
+	evms := map[string]*EthEngine{}
+	var kept []*keptEVM
+	if !signet {
+		for i, c := range evmChains {
+			if c.ID == "eth" && *ethRPC != "" {
+				if !ethNodeUp(*ethRPC) {
+					fmt.Println("No Ethereum node at", *ethRPC, "- leaving Ethereum out.")
+					continue
+				}
+				ec := evmConfig(c, "", "", *ethRPC)
+				ethFile := filepath.Join(*data, "eth.json")
+				ec.Contract = keptContract(ethFile)
+				ee := NewEthEngine(ec)
+				ee.Start()
+				go rememberContract(ee, ethFile)
+				evms[c.ID] = ee
+				continue
 			}
-			if err := saveContract(ethFile, ee.Endpoint().Contract); err != nil {
-				fmt.Println("Couldn't save the contract address:", err)
+			if !hardhatInstalled(*hardhat) {
+				fmt.Println("Hardhat isn't installed in", *hardhat, "- running without the EVM chains (see the README).")
+				break
 			}
-		}()
-	} else if *ethRPC != "" {
-		fmt.Println("No Ethereum node at", *ethRPC, "- running Bitcoin and Litecoin only. Start Hardhat first to include Ethereum.")
+			k, err := startKeptEVM(c, *hardhat, filepath.Join(*data, "evm-"+c.ID+".jsonl"), *port+10+i)
+			if err != nil {
+				fmt.Printf("Couldn't start %s: %v\n", c.Name, err)
+				continue
+			}
+			if k.Note != "" {
+				fmt.Printf("%s: %s\n", c.Name, k.Note)
+			}
+			ec := evmConfig(c, "", "", k.URL)
+			cf := filepath.Join(*data, "evm-"+c.ID+".json")
+			ec.Contract = keptContract(cf)
+			k.Eng = NewEthEngine(ec)
+			k.Eng.Start()
+			go rememberContract(k.Eng, cf)
+			evms[c.ID] = k.Eng
+			kept = append(kept, k)
+		}
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -143,8 +168,8 @@ func runChains(args []string) {
 		for _, e := range engines {
 			e.Stop()
 		}
-		if ee != nil {
-			ee.Stop()
+		for _, k := range kept {
+			k.Stop()
 		}
 		os.Exit(0)
 	}()
@@ -156,9 +181,12 @@ func runChains(args []string) {
 			s := e.Snapshot()
 			out = append(out, ChainStatus{ID: id, RPC: e.RPCAddr(), Progress: s.Progress, Ready: s.Ready, Network: e.cfg.Network})
 		}
-		if ee != nil {
+		for id, ee := range evms {
 			s := ee.Snapshot()
-			cs := ChainStatus{ID: "eth", RPC: *ethRPC, Progress: s.Progress, Ready: s.Ready}
+			cs := ChainStatus{ID: id, RPC: ee.cfg.RPCURL, Progress: s.Progress, Ready: s.Ready}
+			if s.InitErr != "" {
+				cs.Progress = "Failed: " + s.InitErr
+			}
 			if s.Ready {
 				ep := ee.Endpoint()
 				cs.Eth = &ep
@@ -169,9 +197,9 @@ func runChains(args []string) {
 		return out, nil
 	}))
 	m.Handle("/faucet", handle(func(r FaucetReq) (FaucetResp, error) {
-		if r.Chain == "eth" && ee != nil {
+		if ee, ok := evms[r.Chain]; ok {
 			if r.Sats <= 0 || r.Sats > 25*unit {
-				return FaucetResp{}, userErr("Ask for up to 25 ETH.")
+				return FaucetResp{}, userErr("Ask for up to 25 %s.", ee.Info().Ticker)
 			}
 			return FaucetResp{Amt: r.Sats}, ee.FundAddress(r.Addr, r.Sats)
 		}
@@ -186,7 +214,7 @@ func runChains(args []string) {
 		return FaucetResp{op, r.Sats}, err
 	}))
 	m.Handle("/mine", handle(func(r MineReq) (empty, error) {
-		if r.Chain == "eth" && ee != nil {
+		if ee, ok := evms[r.Chain]; ok {
 			return empty{}, ee.MineEth(r.N, r.Secs)
 		}
 		e, ok := engines[r.Chain]
@@ -221,18 +249,21 @@ func runChains(args []string) {
 }
 
 // waitChains waits until the chains service reports every chain ready. It
-// returns the Bitcoin and Litecoin settings and RPC addresses, and Ethereum's
-// endpoint when the chains service runs it.
-func waitChains(url string) (map[string]UTXOConfig, map[string]string, *EthEndpoint) {
+// returns the Bitcoin and Litecoin settings and RPC addresses, and each EVM
+// chain's endpoint (eth, pol, base, bnb, avax) that the chains service runs.
+func waitChains(url string) (map[string]UTXOConfig, map[string]string, map[string]*EthEndpoint) {
 	fmt.Println("Waiting for the test chains at", url, "…")
 	for {
 		var st []ChainStatus
 		if err := call(url, "/chains", empty{}, &st); err == nil && len(st) > 0 {
 			rpc, ready, cfgs := map[string]string{}, true, map[string]UTXOConfig{}
-			var ep *EthEndpoint
+			eps := map[string]*EthEndpoint{}
 			for _, c := range st {
-				if c.ID == "eth" {
-					ep = c.Eth
+				if strings.HasPrefix(c.Progress, "Failed") {
+					continue // a chain that couldn't start is left out
+				}
+				if isEVM(c.ID) {
+					eps[c.ID] = c.Eth
 				} else {
 					rpc[c.ID] = c.RPC
 					cfgs[c.ID] = splitConfigs()[c.ID]
@@ -243,7 +274,7 @@ func waitChains(url string) (map[string]UTXOConfig, map[string]string, *EthEndpo
 				ready = ready && c.Ready
 			}
 			if ready {
-				return cfgs, rpc, ep
+				return cfgs, rpc, eps
 			}
 		}
 		time.Sleep(2 * time.Second)
@@ -268,6 +299,8 @@ type XChainView struct {
 	ID, Ticker, Mode string
 	Price, Wallet    int64
 	Address          string // signet: where to send coins to the exchange's wallet
+	Name, Color      string // for the admin page's coin icons
+	Badge            string
 }
 type XStateResp struct {
 	Chains []XChainView
@@ -278,8 +311,8 @@ type XStateResp struct {
 func (x *Exchange) info(r InfoReq) (InfoResp, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if r.Chain == "eth" && x.eth != nil {
-		return InfoResp{x.eth.price, x.eth.mode}, nil
+	if xe := x.evm[r.Chain]; xe != nil {
+		return InfoResp{xe.price, xe.mode}, nil
 	}
 	xc, ok := x.chains[r.Chain]
 	if !ok {
@@ -299,7 +332,7 @@ func (x *Exchange) state(empty) (XStateResp, error) {
 				bal += a
 			}
 		}
-		out.Chains = append(out.Chains, XChainView{id, xc.cfg.Info.Ticker, xc.mode, xc.price, bal, ""})
+		out.Chains = append(out.Chains, XChainView{id, xc.cfg.Info.Ticker, xc.mode, xc.price, bal, "", xc.cfg.Info.Name, xc.cfg.Info.Color, xc.cfg.Info.Badge})
 		if xc.cfg.Network == "signet" {
 			out.Chains[len(out.Chains)-1].Address = address(xc.pay, &xc.cfg.Params)
 		}
@@ -317,6 +350,7 @@ func (x *Exchange) state(empty) (XStateResp, error) {
 		out.Vaults = append(out.Vaults, XVaultView{v.id, v.account, v.chain, st, l.UserSats, l.ExchSats, len(v.states), v.events})
 	}
 	x.ethAdminView(&out)
+	sort.SliceStable(out.Chains, func(i, j int) bool { return chainOrder(out.Chains[i].ID) < chainOrder(out.Chains[j].ID) })
 	x.bookAdminView(&out)
 	sort.Slice(out.Vaults, func(i, j int) bool { return out.Vaults[i].ID < out.Vaults[j].ID })
 	return out, nil
@@ -330,19 +364,23 @@ func runExchange(args []string) {
 	noBrowser := fs.Bool("no-browser", false, "don't open the admin page")
 	data := fs.String("data", DataDir(), "folder for the exchange's saved data (exchange.json)")
 	fresh := fs.Bool("fresh", false, "start a new exchange (the old file is renamed, not deleted)")
+	protect := fs.Bool("password", false, "protect the saved file with a password (asked for at start)")
+	unprotect := fs.Bool("remove-password", false, "save the file in plain text again")
 	fs.Parse(args)
 
-	cfgs, rpc, ep := waitChains(*chains)
+	cfgs, rpc, eps := waitChains(*chains)
 	x, err := NewExchange(cfgs, rpc)
 	if err != nil {
 		fmt.Println("Couldn't connect to the test nodes:", err)
 		os.Exit(1)
 	}
-	if ep != nil {
-		x.AttachEth(*ep, ethConfig("", "").DefaultPrice)
+	for _, c := range evmChains {
+		if ep := eps[c.ID]; ep != nil {
+			x.AttachEVM(c.ID, *ep, c.Price)
+		}
 	}
 	file := filepath.Join(*data, "exchange.json")
-	loaded := startFile(file, *fresh, x.Load)
+	loaded := startSealed(file, "the exchange's file", *fresh, *protect, *unprotect, func(k *sealKey) { x.seal = k }, x.Load)
 	for id, xc := range x.chains {
 		if xc.cfg.Network == "signet" {
 			fmt.Printf("Signet: send coins to the exchange's wallet at %s (from a public signet faucet). It finds them by itself.\n", address(xc.pay, &xc.cfg.Params))
@@ -359,9 +397,12 @@ func runExchange(args []string) {
 		x.AddCoins(id, f.Op, f.Amt)
 		call(*chains, "/mine", MineReq{Chain: id, N: 1}, nil)
 	}
-	if ep != nil && (!loaded || fromWei(x.eth.c.balance(x.eth.addr)) < unit) {
-		if err := call(*chains, "/faucet", FaucetReq{Chain: "eth", Addr: x.eth.addr, Sats: *stock * unit}, nil); err != nil {
-			fmt.Println("Couldn't get test ETH:", err)
+	for id, xe := range x.evm {
+		if loaded && fromWei(xe.c.balance(xe.addr)) >= unit {
+			continue // funded on an earlier run
+		}
+		if err := call(*chains, "/faucet", FaucetReq{Chain: id, Addr: xe.addr, Sats: *stock * unit}, nil); err != nil {
+			fmt.Printf("Couldn't get test %s: %v\n", xe.ticker, err)
 			os.Exit(1)
 		}
 	}
@@ -381,7 +422,7 @@ func runExchange(args []string) {
 	})
 	ln, url := listen(*port)
 	fmt.Println("Castlekeep exchange server (test networks only)")
-	fmt.Println("It holds only the exchange's keys. Saved in:", file, "(plain text: test coins only)")
+	fmt.Println("It holds only the exchange's keys. Saved in:", file, savedHow(x.seal))
 	fmt.Println("Admin page:", url)
 	fmt.Println("Next, in another window:  go run . wallet")
 	if !*noBrowser {
@@ -401,23 +442,27 @@ func runWallet(args []string) {
 	name := fs.String("name", "", "a name for this wallet, e.g. alice (run a second wallet with -name bob -port 9301)")
 	data := fs.String("data", DataDir(), "folder for the wallet's saved data")
 	fresh := fs.Bool("fresh", false, "start a new wallet with new keys (the old file is renamed, not deleted)")
+	protect := fs.Bool("password", false, "protect the saved file with a password (asked for at start)")
+	unprotect := fs.Bool("remove-password", false, "save the file in plain text again")
 	fs.Parse(args)
 	if !validName(*name) {
 		fmt.Println("Use only letters, digits, - and _ in -name.")
 		os.Exit(1)
 	}
 
-	cfgs, rpc, ep := waitChains(*chains)
+	cfgs, rpc, eps := waitChains(*chains)
 	w, err := NewWallet(*exch, cfgs, rpc)
 	if err != nil {
 		fmt.Println("Couldn't connect to the test nodes:", err)
 		os.Exit(1)
 	}
-	if ep != nil {
-		w.AttachEth(*ep)
+	for _, c := range evmChains {
+		if ep := eps[c.ID]; ep != nil {
+			w.AttachEVM(c.ID, *ep)
+		}
 	}
 	file := filepath.Join(*data, walletFile(*name))
-	loaded := startFile(file, *fresh, w.Load)
+	loaded := startSealed(file, "your wallet", *fresh, *protect, *unprotect, func(k *sealKey) { w.seal = k }, w.Load)
 	if !loaded {
 		w.SetName(*name)
 	}
@@ -440,10 +485,13 @@ func runWallet(args []string) {
 		}
 		engines = append(engines, we)
 	}
-	if ep != nil {
-		ee := &walletEthEngine{w: w, info: ethConfig("", "").Info, chains: *chains, exch: *exch}
-		ee.info.Model = "Separate programs: your wallet holds only your Ethereum key and checks the exchange's signature on every state. " + ee.info.Model
-		if loaded && w.EthBalance() >= unit {
+	for _, c := range evmChains {
+		if eps[c.ID] == nil {
+			continue
+		}
+		ee := &walletEthEngine{w: w, id: c.ID, info: evmConfig(c, "", "", "").Info, chains: *chains, exch: *exch}
+		ee.info.Model = "Separate programs: your wallet holds only your " + c.Name + " key and checks the exchange's signature on every state. " + ee.info.Model
+		if loaded && w.EthBalance(c.ID) >= unit {
 			// funded on an earlier run
 		} else if ee.Do(ActionReq{Action: "faucet"}) == nil {
 			ee.Do(ActionReq{Action: "faucet"})
@@ -477,7 +525,7 @@ func runWallet(args []string) {
 		fmt.Println("Wallet name:", *name)
 	}
 	fmt.Println("It holds only your keys. Exchange server:", *exch)
-	fmt.Println("Saved in:", file, "(your private keys in plain text: test coins only)")
+	fmt.Println("Saved in:", file, savedHow(w.seal))
 	fmt.Println("Open:", url)
 	if !*noBrowser {
 		openBrowser(url)
@@ -506,6 +554,8 @@ func (e *walletEngine) Do(r ActionReq) error {
 	var err error
 	ok := ""
 	switch r.Action {
+	case "speedup":
+		ok, err = w.SpeedUp(e.id)
 	case "faucet":
 		if e.info.Signet {
 			var got int64
@@ -615,6 +665,7 @@ func (e *walletEngine) Snapshot() Snapshot {
 	defer e.w.mu.Unlock()
 	wc := e.w.chains[e.id]
 	s.Height = wc.c.height()
+	s.Bumpable, s.FeeNote = len(wc.bumpable()), wc.c.feeNote()
 	if mp, err := wc.c.rpc.GetRawMempool(); err == nil {
 		s.Mempool = len(mp)
 	}
@@ -701,4 +752,18 @@ func (e *walletEngine) vaultView(wc *wChain, v *wVault, height int64) *VaultView
 		vv.Status = "open"
 	}
 	return vv
+}
+
+// rememberContract saves the contract address once the engine is ready, so
+// the next run uses the same contract.
+func rememberContract(ee *EthEngine, file string) {
+	for !ee.Snapshot().Ready {
+		if ee.Snapshot().InitErr != "" {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	if err := saveContract(file, ee.Endpoint().Contract); err != nil {
+		fmt.Println("Couldn't save the contract address:", err)
+	}
 }

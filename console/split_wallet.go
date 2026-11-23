@@ -14,19 +14,21 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 )
 
 type wChain struct {
-	id       string
-	cfg      UTXOConfig
-	c        *chainConn
-	key      *btcec.PrivateKey // wallet key
-	pay      []byte
-	coins    []utxo
-	vault    *wVault
-	lastScan time.Time // signet: last look for coins sent to the wallet
+	id        string
+	cfg       UTXOConfig
+	c         *chainConn
+	key       *btcec.PrivateKey // wallet key
+	pay       []byte
+	coins     []utxo
+	vault     *wVault
+	lastScan  time.Time                // signet: last look for coins sent to the wallet
+	firstSeen map[chainhash.Hash]int64 // when each waiting transaction was first seen (fees.go)
 }
 
 type wVault struct {
@@ -59,12 +61,13 @@ type Wallet struct {
 	Name    string // shown on the page; the account id starts with it
 	WT      bool   // the user's watchtower
 	chains  map[string]*wChain
-	eth     *wEth
+	evm     map[string]*wEth // EVM chains by ID
 	orders  map[int]*wOrder
 
 	// saving (split_save.go)
 	file, saveErr string
 	lastSaved     []byte
+	seal          *sealKey // password for the file (seal.go); nil: plain text
 }
 
 func NewWallet(exchangeURL string, cfgs map[string]UTXOConfig, rpc map[string]string) (*Wallet, error) {
@@ -170,6 +173,7 @@ func (w *Wallet) Open(chain string, sats int64) error {
 	if err != nil {
 		return userErr("The exchange sent a bad key: %v", err)
 	}
+	def.anchors = keys.Anchors
 	fund, err := wc.buildDeposit(def.V.pkScript, sats)
 	if err != nil {
 		return err
@@ -498,9 +502,14 @@ func (w *Wallet) Tick() {
 			w.finishSplice(wc, v)
 			w.watch(wc, v)
 		}
+		w.autoBump(wc)
 	}
 	w.ethTick()
-	for _, c := range []string{"btc", "ltc", "eth"} {
+	ids := []string{"btc", "ltc"}
+	for _, c := range evmChains {
+		ids = append(ids, c.ID)
+	}
+	for _, c := range ids {
 		if _, err := w.vaultID(c); err == nil {
 			w.signFills(c)
 		}

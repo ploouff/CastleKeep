@@ -33,6 +33,8 @@ const weiPerUnit = 10_000_000_000 // 1e10 wei = 0.00000001 ETH
 type EthConfig struct {
 	Info         ChainInfo
 	AnvilPath    string // start this Anvil if it exists
+	HardhatDir   string // or start a Hardhat node from this folder (it has node_modules\hardhat)
+	ChainID      int64  // chain ID for a node started here (0: the node's default)
 	RPCURL       string // or connect to an already-running node
 	InstallHint  string
 	ExitDelay    int64 // seconds
@@ -81,10 +83,12 @@ type EthEngine struct {
 	progress    string
 	initErr     string
 
-	node    *exec.Cmd
-	url     string
-	client  string // "anvil" or "hardhat"
-	chainID *big.Int
+	node      *exec.Cmd
+	url       string
+	signLocal bool       // sign transactions here and send them raw (evm_sign.go)
+	signer    signerFunc // the keys this engine may sign with
+	client    string     // "anvil" or "hardhat"
+	chainID   *big.Int
 
 	userKey, exchKey   *btcec.PrivateKey
 	userAddr, exchAddr string
@@ -106,7 +110,7 @@ func NewEthEngine(cfg EthConfig) *EthEngine {
 	uk, _ := btcec.NewPrivateKey()
 	ek, _ := btcec.NewPrivateKey()
 	e := &EthEngine{
-		cfg: cfg, progress: "Starting the Ethereum node…",
+		cfg: cfg, progress: "Starting the " + cfg.Info.Name + " node…",
 		userKey: uk, exchKey: ek, userAddr: ethAddress(uk), exchAddr: ethAddress(ek),
 		tradeBook: tradeBook{acct: NewAccount(), price: cfg.DefaultPrice, mode: "honest"},
 		userWT:    true,
@@ -115,8 +119,10 @@ func NewEthEngine(cfg EthConfig) *EthEngine {
 	switch {
 	case cfg.RPCURL != "":
 		e.available, e.url = true, cfg.RPCURL
-	case cfg.AnvilPath != "":
-		if _, err := os.Stat(cfg.AnvilPath); err == nil {
+	default:
+		if _, err := os.Stat(cfg.AnvilPath); cfg.AnvilPath != "" && err == nil {
+			e.available = true
+		} else if hardhatInstalled(cfg.HardhatDir) {
 			e.available = true
 		}
 	}
@@ -127,7 +133,7 @@ func NewEthEngine(cfg EthConfig) *EthEngine {
 }
 
 func (e *EthEngine) Info() ChainInfo    { return e.cfg.Info }
-func (e *EthEngine) fmt(s int64) string { return fmtCoin(s, "ETH") }
+func (e *EthEngine) fmt(s int64) string { return fmtCoin(s, e.cfg.Info.Ticker) }
 
 // ------------------------------------------------------------------ crypto + ABI
 
@@ -330,7 +336,11 @@ func (e *EthEngine) sendRaw(tx map[string]string, info *TxInfo, okTitle, badTitl
 	var hash string
 	if err == nil {
 		tx["gas"] = "0x" + new(big.Int).Div(new(big.Int).Mul(hexBig(gas), big.NewInt(13)), big.NewInt(10)).Text(16)
-		hash, err = e.callStr("eth_sendTransaction", tx)
+		if k := e.signerFor(tx["from"]); k != nil {
+			hash, err = e.sendSigned(tx, k)
+		} else {
+			hash, err = e.callStr("eth_sendTransaction", tx)
+		}
 	}
 	if err != nil {
 		e.rejected++
@@ -403,9 +413,21 @@ func (e *EthEngine) start() error {
 	if e.url == "" {
 		port := freePort()
 		e.url = fmt.Sprintf("http://127.0.0.1:%d", port)
-		e.node = exec.Command(e.cfg.AnvilPath, "--port", fmt.Sprint(port), "--silent")
-		if err := e.node.Start(); err != nil {
-			return fmt.Errorf("couldn't start anvil: %v", err)
+		if _, err := os.Stat(e.cfg.AnvilPath); e.cfg.AnvilPath != "" && err == nil {
+			args := []string{"--port", fmt.Sprint(port), "--silent"}
+			if e.cfg.ChainID != 0 {
+				args = append(args, "--chain-id", fmt.Sprint(e.cfg.ChainID))
+			}
+			e.node = exec.Command(e.cfg.AnvilPath, args...)
+			if err := e.node.Start(); err != nil {
+				return fmt.Errorf("couldn't start anvil: %v", err)
+			}
+		} else {
+			cmd, err := startHardhat(e.cfg.HardhatDir, e.cfg.ChainID, port)
+			if err != nil {
+				return err
+			}
+			e.node = cmd
 		}
 	}
 	for i := 0; ; i++ {
@@ -413,7 +435,7 @@ func (e *EthEngine) start() error {
 			break
 		}
 		if i > 120 {
-			return errors.New("the Ethereum node didn't respond")
+			return fmt.Errorf("the %s node didn't respond", e.cfg.Info.Name)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -490,7 +512,7 @@ func (e *EthEngine) start() error {
 	e.call("evm_mine")
 	e.exchStart = e.balance(e.exchAddr)
 	e.log("info", "Test chain ready", fmt.Sprintf("CastleVault contract at %s on a local %s node.", e.contract, map[string]string{"anvil": "Anvil", "hardhat": "Hardhat"}[e.client]), "")
-	e.log("info", "Your wallet has 2 test ETH", "Lock some into a vault to start trading. Gas fees come out of your wallet, as on the real network.", "")
+	e.log("info", "Your wallet has 2 test "+e.cfg.Info.Ticker, "Lock some into a vault to start trading. Gas fees come out of your wallet, as on the real network.", "")
 	e.progress = "Ready"
 	e.ready = true
 	return nil
@@ -629,10 +651,10 @@ func (e *EthEngine) Do(r ActionReq) error {
 }
 
 func (e *EthEngine) faucet() error {
-	info := &TxInfo{Label: "Test faucet: 1 ETH to your wallet", Path: "Ordinary ETH transfer from a test account",
+	info := &TxInfo{Label: "Test faucet: 1 " + e.cfg.Info.Ticker + " to your wallet", Path: "Ordinary " + e.cfg.Info.Ticker + " transfer from a test account",
 		Inputs: []IO{{Label: "Test faucet account", Sats: unit, Ref: e.faucetAddr}}, Outputs: []IO{{Label: "Your wallet", Sats: unit, Ref: e.userAddr}}}
 	e.sendRaw(map[string]string{"from": e.faucetAddr, "to": e.userAddr, "value": "0x" + toWei(unit).Text(16)},
-		info, "Received 1 test ETH", "Faucet payment refused")
+		info, "Received 1 test "+e.cfg.Info.Ticker, "Faucet payment refused")
 	return nil
 }
 
@@ -686,7 +708,7 @@ func (e *EthEngine) addCapacity(sats int64) error {
 		return userErr("The exchange has already locked buying capacity in this vault.")
 	}
 	if sats < 100_000 || sats > 5*unit {
-		return userErr("Ask for between 0.001 and 5 ETH.")
+		return userErr("Ask for between 0.001 and 5 %s.", e.cfg.Info.Ticker)
 	}
 	fee := capacityFee(sats)
 	if fee > v.latest().UserSats {
@@ -733,7 +755,7 @@ func (e *EthEngine) lock(sats int64) error {
 		return userErr("You already have an open vault. Settle or exit it first.")
 	}
 	if sats < 100_000 {
-		return userErr("Lock at least 0.001 ETH.")
+		return userErr("Lock at least 0.001 %s.", e.cfg.Info.Ticker)
 	}
 	bal := fromWei(e.balance(e.userAddr))
 	if sats+100_000 > bal {
@@ -756,7 +778,7 @@ func (e *EthEngine) lock(sats int64) error {
 	e.vault = &ethVault{id: id, amount: sats, userDeposit: sats, openTx: hash, exchLast: -1, userLast: -1}
 	e.newState("Opening balance", sats, 0)
 	e.log("sign", "You and the exchange signed state #0: you own the whole vault",
-		"On Ethereum both sides sign every state, and the contract always prefers the newest one.", "")
+		"On "+e.cfg.Info.Name+" both sides sign every state, and the contract always prefers the newest one.", "")
 	return nil
 }
 
@@ -765,7 +787,7 @@ func (e *EthEngine) unlockTrade() { e.mu.Unlock() }
 
 func (e *EthEngine) tradeReady() error {
 	if !e.ready {
-		return userErr("The Ethereum test chain is still starting up.")
+		return userErr("The %s test chain is still starting up.", e.cfg.Info.Name)
 	}
 	return nil
 }
@@ -777,14 +799,14 @@ func (e *EthEngine) canTrade(side string, sats int64) error {
 	switch st := e.vaultStatus(); st {
 	case "open":
 	case "funding":
-		return userErr("Your ETH deposit hasn't confirmed yet. Mine a block first.")
+		return userErr("Your %s deposit hasn't confirmed yet. Mine a block first.", e.cfg.Info.Ticker)
 	case "none", "closed", "closing":
-		return userErr("Lock ETH into a vault before trading.")
+		return userErr("Lock %s into a vault before trading.", e.cfg.Info.Ticker)
 	default:
-		return userErr("ETH trading is frozen while an exit is in progress.")
+		return userErr("%s trading is frozen while an exit is in progress.", e.cfg.Info.Ticker)
 	}
 	if e.mode == "offline" {
-		return userErr("The exchange is offline and isn't accepting ETH orders.")
+		return userErr("The exchange is offline and isn't accepting %s orders.", e.cfg.Info.Ticker)
 	}
 	if sats <= 0 {
 		return userErr("Enter an amount above zero.")
@@ -798,7 +820,7 @@ func (e *EthEngine) canTrade(side string, sats int64) error {
 	case "buy":
 		if sats > l.ExchSats {
 			if v.exchDeposit == 0 {
-				return userErr("You can only buy back ETH sold from this vault (%s). Ask the exchange to lock buying capacity to buy more.", e.fmt(l.ExchSats))
+				return userErr("You can only buy back %s sold from this vault (%s). Ask the exchange to lock buying capacity to buy more.", e.cfg.Info.Ticker, e.fmt(l.ExchSats))
 			}
 			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", e.fmt(l.ExchSats))
 		}
@@ -929,10 +951,10 @@ func (e *EthEngine) finalize() error {
 		if !cv.hasBest {
 			switch l := v.latest(); {
 			case l.UserSats < v.userDeposit:
-				e.log("warn", "Nobody submitted a state, so you kept ETH you had sold",
+				e.log("warn", "Nobody submitted a state, so you kept "+e.cfg.Info.Ticker+" you had sold",
 					"The exchange missed its window. This is why a real exchange must watch for exits around the clock.", "")
 			case l.UserSats > v.userDeposit:
-				e.log("warn", "Nobody submitted a state, so the ETH you bought went back to the exchange",
+				e.log("warn", "Nobody submitted a state, so the "+e.cfg.Info.Ticker+" you bought went back to the exchange",
 					"With no state submitted, each side gets its own deposit back. Your watchtower would have submitted your latest state.", "")
 			}
 		}
@@ -1073,7 +1095,7 @@ func (e *EthEngine) Snapshot() Snapshot {
 				{"Settle now: both signatures on the same state", "settle(id, nonce, userAmount, userSig, exchangeSig)\n" + ruleSig},
 				{"During the 24-hour exit window", "submitState(...)\nrequire(nonce > bestNonce)   // only a newer state wins"},
 				{"After the window", "finalize(id)\npays the newest submitted state, or refunds each side its own deposit if nobody submitted one"},
-				{"Buying capacity", "fund(id)   // exchange only, once\nlocks the exchange's ETH in the vault so you can buy from it"},
+				{"Buying capacity", "fund(id)   // exchange only, once\nlocks the exchange's coins in the vault so you can buy from it"},
 			}}
 		l := v.latest()
 		vv.UserSats, vv.ExchSats = l.UserSats, l.ExchSats
@@ -1110,6 +1132,7 @@ type EthEndpoint struct {
 	URL, Contract, Client string
 	ChainID               string // decimal
 	ExitDelay             int64
+	SignLocally           bool // each program signs its own transactions (public networks; evm_sign.go)
 }
 
 func (e *EthEngine) Endpoint() EthEndpoint {
@@ -1127,7 +1150,7 @@ func (e *EthEngine) Endpoint() EthEndpoint {
 func newEthLight(ep EthEndpoint) *EthEngine {
 	id, _ := new(big.Int).SetString(ep.ChainID, 10)
 	return &EthEngine{url: ep.URL, contract: ep.Contract, client: ep.Client, chainID: id,
-		cfg: EthConfig{ExitDelay: ep.ExitDelay}, txs: map[string]*TxInfo{}, ready: true}
+		cfg: EthConfig{ExitDelay: ep.ExitDelay}, txs: map[string]*TxInfo{}, ready: true, signLocal: ep.SignLocally}
 }
 
 // FundAddress adds test ETH to an address and lets the node send from it.

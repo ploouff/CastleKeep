@@ -111,6 +111,54 @@ func TestSplitBitcoin(t *testing.T)  { runSplit(t, "btc") }
 func TestSplitLitecoin(t *testing.T) { runSplit(t, "ltc") }
 
 func runSplit(t *testing.T, chain string) {
+	t.Run("SpeedUpExitRequest", func(t *testing.T) {
+		s := newSplit(t, chain)
+		s.open()
+		g := s.vault().gen()
+		if n := len(g.exitTx.TxOut); n != 3 {
+			t.Fatalf("the exit request has %d outputs, want 3 (with an anchor for each side)", n)
+		}
+		_, err := s.w.SpeedUp(chain)
+		s.refused(err, "waiting")
+		s.ok(s.w.Exit(chain))
+		msg, err := s.w.SpeedUp(chain)
+		s.ok(err)
+		t.Log(msg)
+		wc := s.w.chains[chain]
+		if len(wc.bumpable()) != 0 {
+			t.Fatal("still listed as waiting after speeding up (the child should not be sped up again)")
+		}
+		s.mine(1)
+		if wc.c.confs(g.exitTx) < 1 {
+			t.Fatal("the exit request didn't confirm")
+		}
+	})
+
+	t.Run("WatchtowerSpeedsUpWaitingExit", func(t *testing.T) {
+		s := newSplit(t, chain)
+		s.open()
+		s.ok(s.w.Exit(chain))
+		wc := s.w.chains[chain]
+		s.w.Tick() // first sight of the waiting exit request
+		id := s.vault().gen().exitTx.TxHash()
+		if _, ok := wc.firstSeen[id]; !ok {
+			t.Fatal("the watchtower didn't note the waiting exit request")
+		}
+		wc.firstSeen[id] -= bumpAfter // as if it had waited that many blocks
+		s.w.Tick()
+		found := false
+		for _, e := range s.vault().Events {
+			found = found || strings.Contains(e, "watchtower sped up")
+		}
+		if !found {
+			t.Fatalf("no speed-up: %v", s.vault().Events)
+		}
+		s.mine(1)
+		if wc.c.confs(s.vault().gen().exitTx) < 1 {
+			t.Fatal("the exit request didn't confirm")
+		}
+	})
+
 	t.Run("NormalTradeAndSettle", func(t *testing.T) {
 		s := newSplit(t, chain)
 		s.open()

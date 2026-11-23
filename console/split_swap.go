@@ -48,11 +48,12 @@ type SwapResp struct {
 // ------------------------------------------------------------------ exchange side
 
 func (x *Exchange) priceOf(chain string) (int64, string, error) {
-	if chain == "eth" {
-		if x.eth == nil {
-			return 0, "", userErr("This exchange has no Ethereum.")
+	if isEVM(chain) {
+		xe, err := x.evmc(chain)
+		if err != nil {
+			return 0, "", err
 		}
-		return x.eth.price, "ETH", nil
+		return xe.price, xe.ticker, nil
 	}
 	xc, ok := x.chains[chain]
 	if !ok {
@@ -66,31 +67,31 @@ func (x *Exchange) priceOf(chain string) (int64, string, error) {
 // pendSide is how the commit treats cash ("swap-buy", "fill-sell", ...); done runs
 // after the wallet signs.
 func (x *Exchange) swapLeg(l SwapLeg, account, side string, sats, cost int64, label, pendSide string, done func()) (SwapOfferLeg, func(), error) {
-	if l.Chain == "eth" {
-		v, err := x.ethVault(l.VaultID)
+	if isEVM(l.Chain) {
+		xe, v, err := x.ethVault(l.Chain, l.VaultID)
 		if err != nil {
 			return SwapOfferLeg{}, nil, err
 		}
 		if v.account != account {
 			return SwapOfferLeg{}, nil, userErr("That vault belongs to another account.")
 		}
-		if err := x.ethTradable(v); err != nil {
+		if err := x.ethTradable(xe, v); err != nil {
 			return SwapOfferLeg{}, nil, err
 		}
 		last := v.latest()
 		user, exch := last.UserSats-sats, last.ExchSats+sats
 		if side == "buy" {
 			if sats > last.ExchSats {
-				return SwapOfferLeg{}, nil, userErr("The exchange's side of the ETH vault holds %s, so that's the most you can get.", fmtCoin(last.ExchSats, "ETH"))
+				return SwapOfferLeg{}, nil, userErr("The exchange's side of the %s vault holds %s, so that's the most you can get.", xe.ticker, fmtCoin(last.ExchSats, xe.ticker))
 			}
 			user, exch = last.UserSats+sats, last.ExchSats-sats
 		} else if sats > last.UserSats {
-			return SwapOfferLeg{}, nil, userErr("You only have %s in the ETH vault.", fmtCoin(last.UserSats, "ETH"))
+			return SwapOfferLeg{}, nil, userErr("You only have %s in the %s vault.", fmtCoin(last.UserSats, xe.ticker), xe.ticker)
 		}
 		st := &ethState{Index: len(v.states), Label: label, UserSats: user, ExchSats: exch}
 		off := SwapOfferLeg{Eth: &EthStateOffer{l.VaultID, st.Index, label, user, exch}}
 		if side == "buy" {
-			off.EthExchSig = x.maybeTamper(signDigest(x.eth.key, x.eth.c.stateDigest(v.id, int64(st.Index), user)))
+			off.EthExchSig = x.maybeTamper(signDigest(xe.key, xe.c.stateDigest(v.id, int64(st.Index), user)))
 		}
 		return off, func() { v.pend = &xEthPend{kind: "order", side: pendSide, cost: cost, st: st, done: done} }, nil
 	}
@@ -199,15 +200,15 @@ func (w *Wallet) Swap(from, to string, sats int64) error {
 		before int64 // our share now
 	}
 	prep := func(chain string) (side, error) {
-		if chain == "eth" {
-			_, v, err := w.ethVault()
+		if isEVM(chain) {
+			we, v, err := w.ethVault(chain)
 			if err != nil {
 				return side{}, err
 			}
 			if len(v.states) == 0 || v.exchFault != "" || v.capPending {
-				return side{}, userErr("Your ETH vault isn't ready to trade.")
+				return side{}, userErr("Your %s vault isn't ready to trade.", we.ticker)
 			}
-			return side{leg: SwapLeg{Chain: "eth", VaultID: v.id.String()}, before: v.latest().UserSats}, nil
+			return side{leg: SwapLeg{Chain: chain, VaultID: v.id.String()}, before: v.latest().UserSats}, nil
 		}
 		_, v, err := w.openVault(chain)
 		if err != nil {
@@ -238,8 +239,8 @@ func (w *Wallet) Swap(from, to string, sats int64) error {
 		return userErr("The exchange's swap doesn't match its own prices. Refusing.")
 	}
 	// Check the exchange's signature on the buying side before signing anything.
-	if to == "eth" {
-		we, v, _ := w.ethVault()
+	if isEVM(to) {
+		we, v, _ := w.ethVault(to)
 		if r.Buy.Eth == nil || r.Buy.Eth.UserSats != st.before+r.Got ||
 			!strings.EqualFold(recoverAddr(we.c.stateDigest(v.id, int64(r.Buy.Eth.Nonce), r.Buy.Eth.UserSats), r.Buy.EthExchSig), we.exchAddr) {
 			return userErr("The exchange's signature on the coin you'd buy doesn't check out. Nothing was signed.")
@@ -247,7 +248,7 @@ func (w *Wallet) Swap(from, to string, sats int64) error {
 	} else if r.Buy.UTXO == nil {
 		return userErr("The exchange's swap is missing the buying side.")
 	}
-	if (from == "eth" && r.Sell.Eth == nil) || (from != "eth" && r.Sell.UTXO == nil) {
+	if (isEVM(from) && r.Sell.Eth == nil) || (!isEVM(from) && r.Sell.UTXO == nil) {
 		return userErr("The exchange's swap is missing the selling side.")
 	}
 	// Buying side first (utxoAgree checks the exchange's signature before
@@ -259,8 +260,8 @@ func (w *Wallet) Swap(from, to string, sats int64) error {
 }
 
 func (w *Wallet) swapAgree(chain string, off SwapOfferLeg, want int64, us, uh []byte) error {
-	if chain == "eth" {
-		we, v, _ := w.ethVault()
+	if isEVM(chain) {
+		we, v, _ := w.ethVault(chain)
 		return w.ethAgree(we, v, *off.Eth, want, w.ethAmount(we, v))
 	}
 	_, v, _ := w.openVault(chain)

@@ -53,6 +53,17 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const coin = (u, t) => (u / 1e8).toFixed(8).replace(/0+$/, "").replace(/\.$/, "") + " " + t;
 const usd = n => "$" + Math.round(n).toLocaleString("en-US");
 const modes = {honest: "Honest", offline: "Offline", malicious: "Malicious"};
+// Coin icons: a plain coloured disc with a letter, drawn here (not the coin projects' own logos).
+function coinIcon(c, size) {
+  const s = size || 18, txt = (c && c.Badge) || String((c && c.Ticker) || "?").slice(0, 1);
+  const fs = txt.length > 2 ? s * 0.32 : txt.length > 1 ? s * 0.42 : s * 0.6;
+  const col = (c && c.Color) || "#8a8f98", rgb = parseInt(col.slice(1), 16);
+  const light = 0.299 * (rgb >> 16) + 0.587 * ((rgb >> 8) & 255) + 0.114 * (rgb & 255) > 170;
+  return `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" aria-hidden="true" style="vertical-align:-3px;flex:none"><circle cx="${s / 2}" cy="${s / 2}" r="${s / 2}" fill="${esc(col)}"/><text x="50%" y="52%" dominant-baseline="central" text-anchor="middle" fill="${light ? "#1d1d1b" : "#fff"}" font-family="system-ui,Segoe UI,sans-serif" font-weight="700" font-size="${fs.toFixed(1)}">${esc(txt)}</text></svg>`;
+}
+let byChain = {};
+const tick = id => (byChain[id] && byChain[id].Ticker) || id.toUpperCase();
+const label = id => (byChain[id] ? `${coinIcon(byChain[id], 16)} ${esc(byChain[id].Name || tick(id))}` : esc(tick(id)));
 async function post(path, body) {
   const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
   const j = await r.json();
@@ -64,8 +75,10 @@ async function refresh() {
   try {
     const s = await post("/v1/state");
     $("err").textContent = "";
+    byChain = Object.fromEntries((s.Chains || []).map(c => [c.ID, c]));
     if (!editing) $("chains").innerHTML = (s.Chains || []).map(c => `
       <div>
+        <div style="font:600 17px var(--display)">${coinIcon(c, 20)} ${esc(c.Name || c.Ticker)}</div>
         <div class="muted">${esc(c.Ticker)} · exchange wallet ${esc(coin(c.Wallet, c.Ticker))}</div>
         ${c.Address ? `<div class="muted">Signet: send coins to the exchange's wallet at <span class="mono" style="user-select:all;word-break:break-all">${esc(c.Address)}</span></div>` : ""}
         <div class="big">${usd(c.Price)}</div>
@@ -75,18 +88,18 @@ async function refresh() {
           `<button class="btn" data-chain="${esc(c.ID)}" data-mode="${m}" aria-pressed="${c.Mode === m}">${modes[m]}</button>`).join("")}</div>
       </div>`).join("");
     $("vaults").innerHTML = (s.Vaults || []).map(v => {
-      const t = v.Chain.toUpperCase();
-      return `<tr><td class="mono">${esc(v.ID.slice(0, 8))}</td><td class="mono">${esc(v.Account)}</td><td>${esc(t)}</td><td>${esc(v.Status)}</td>
+      const t = tick(v.Chain);
+      return `<tr><td class="mono">${esc(v.ID.slice(0, 8))}</td><td class="mono">${esc(v.Account)}</td><td>${label(v.Chain)}</td><td>${esc(v.Status)}</td>
         <td>${esc(coin(v.UserSats, t))}</td><td>${esc(coin(v.ExchSats, t))}</td><td>${v.States}</td>
         <td><ul class="ev">${(v.Events || []).slice(-3).map(e => `<li>${esc(e)}</li>`).join("")}</ul></td></tr>`;
     }).join("") || `<tr><td colspan="8" class="muted">No vaults yet. Open one from a wallet.</td></tr>`;
     $("books").innerHTML = (s.Books || []).map(b => {
-      const t = b.Chain.toUpperCase();
+      const t = tick(b.Chain);
       const orders = (b.Orders || []).map(o => `<tr><td>${o.ID}</td><td class="mono">${esc(o.Account)}</td><td>${esc(o.Side)}</td><td>${usd(o.Price)}</td><td>${esc(coin(o.Left, ""))}of ${esc(coin(o.Sats, t))}</td></tr>`).join("")
         || `<tr><td colspan="5" class="muted">No open orders.</td></tr>`;
       const trades = (b.Trades || []).slice(-8).reverse().map(x => `<tr><td>${esc(x.Time)}</td><td>${usd(x.Price)}</td><td>${esc(coin(x.Sats, t))}</td></tr>`).join("")
         || `<tr><td colspan="3" class="muted">No trades yet.</td></tr>`;
-      return `<div><div class="big">${esc(t)}</div>
+      return `<div><div class="big">${label(b.Chain)}</div>
         ${b.Unsigned ? `<p class="muted">${b.Unsigned} fill(s) waiting for a wallet's signature.</p>` : ""}
         <table><thead><tr><th>#</th><th>Account</th><th>Side</th><th>Price</th><th>Left</th></tr></thead><tbody>${orders}</tbody></table>
         <table style="margin-top:10px"><thead><tr><th>Trade time</th><th>Price</th><th>Amount</th></tr></thead><tbody>${trades}</tbody></table></div>`;

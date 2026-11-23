@@ -68,19 +68,19 @@ type xPending struct {
 
 // Exchange is the exchange server's state.
 type Exchange struct {
-	mu        sync.Mutex
-	chains    map[string]*xChain
-	vaults    map[string]*xVault
-	cash      map[string]int64 // account -> cents
-	tamper    bool             // tests only: corrupt the next signature sent to the wallet
-	eth       *xEth
-	ethVaults map[string]*xEthVault
-	books     map[string]*book
-	orderSeq  int
+	mu       sync.Mutex
+	chains   map[string]*xChain
+	vaults   map[string]*xVault
+	cash     map[string]int64 // account -> cents
+	tamper   bool             // tests only: corrupt the next signature sent to the wallet
+	evm      map[string]*xEth // EVM chains by ID (eth, pol, base, bnb, avax)
+	books    map[string]*book
+	orderSeq int
 
 	// saving (split_save.go)
 	file, saveErr string
 	lastSaved     []byte
+	seal          *sealKey // password for the file (seal.go); nil: plain text
 }
 
 // NewExchange connects to each chain's node. rpc maps chain id to the
@@ -181,9 +181,10 @@ func (x *Exchange) openKeys(r OpenKeysReq) (OpenKeysResp, error) {
 	if err != nil {
 		return OpenKeysResp{}, userErr("%v", err)
 	}
+	def.anchors = true
 	v := &xVault{id: newID(), account: r.Account, chain: r.Chain, key: k, def: def}
 	x.vaults[v.id] = v
-	return OpenKeysResp{VaultID: v.id, ExchPub: xonly(k), ExchPay: xc.pay, Delay: def.delay, D2: def.d2}, nil
+	return OpenKeysResp{VaultID: v.id, ExchPub: xonly(k), ExchPay: xc.pay, Delay: def.delay, D2: def.d2, Anchors: def.anchors}, nil
 }
 
 func (x *Exchange) openStart(r OpenStartReq) (OpenStartResp, error) {
@@ -382,16 +383,16 @@ func (x *Exchange) addCash(r CashReq) (CashResp, error) {
 func (x *Exchange) admin(r AdminReq) (empty, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if r.Chain == "eth" && x.eth != nil {
+	if xe := x.evm[r.Chain]; xe != nil {
 		switch r.Mode {
 		case "":
 		case "honest", "offline", "malicious":
-			x.eth.mode = r.Mode
+			xe.mode = r.Mode
 		default:
 			return empty{}, userErr("Unknown mode.")
 		}
 		if r.USD > 0 {
-			x.eth.price = r.USD
+			xe.price = r.USD
 		}
 		return empty{}, nil
 	}

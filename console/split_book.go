@@ -110,15 +110,15 @@ func (x *Exchange) bookFor(chain string) *book {
 
 // vaultShares returns the user's and the exchange's side of a vault now.
 func (x *Exchange) vaultShares(chain, vault, account string) (user, exch int64, err error) {
-	if chain == "eth" {
-		v, err := x.ethVault(vault)
+	if isEVM(chain) {
+		xe, v, err := x.ethVault(chain, vault)
 		if err != nil {
 			return 0, 0, err
 		}
 		if v.account != account || len(v.states) == 0 {
 			return 0, 0, userErr("That vault isn't yours or isn't open.")
 		}
-		if err := x.ethTradable(v); err != nil {
+		if err := x.ethTradable(xe, v); err != nil {
 			return 0, 0, err
 		}
 		l := v.latest()
@@ -217,11 +217,11 @@ func (x *Exchange) nextOrderID() int {
 }
 
 func (x *Exchange) modeOf(chain string) string {
-	if chain == "eth" {
-		if x.eth == nil {
-			return "offline"
+	if isEVM(chain) {
+		if xe := x.evm[chain]; xe != nil {
+			return xe.mode
 		}
-		return x.eth.mode
+		return "offline"
 	}
 	if xc, ok := x.chains[chain]; ok {
 		return xc.mode
@@ -270,8 +270,8 @@ func (x *Exchange) match(b *book, o *bookOrder) (matched int64) {
 }
 
 func (x *Exchange) setPrice(chain string, price int64) {
-	if chain == "eth" && x.eth != nil {
-		x.eth.price = price
+	if xe := x.evm[chain]; xe != nil {
+		xe.price = price
 	} else if xc, ok := x.chains[chain]; ok {
 		xc.price = price
 	}
@@ -358,8 +358,8 @@ type wOrder struct {
 }
 
 func (w *Wallet) vaultID(chain string) (string, error) {
-	if chain == "eth" {
-		_, v, err := w.ethVault()
+	if isEVM(chain) {
+		_, v, err := w.ethVault(chain)
 		if err != nil {
 			return "", err
 		}
@@ -408,8 +408,8 @@ func (w *Wallet) signFills(chain string) error {
 	for i := 0; i < 50; i++ {
 		var us, uh []byte
 		var before int64
-		if chain == "eth" {
-			_, v, err := w.ethVault()
+		if isEVM(chain) {
+			_, v, err := w.ethVault(chain)
 			if err != nil || len(v.states) == 0 || v.exchFault != "" {
 				return nil
 			}
@@ -439,8 +439,8 @@ func (w *Wallet) signFills(chain string) error {
 		if f.Side == "buy" {
 			want = before + f.Sats
 		}
-		if chain == "eth" && f.Side == "buy" {
-			we, v, _ := w.ethVault()
+		if isEVM(chain) && f.Side == "buy" {
+			we, v, _ := w.ethVault(chain)
 			if f.Leg.Eth == nil || !strings.EqualFold(recoverAddr(we.c.stateDigest(v.id, int64(f.Leg.Eth.Nonce), want), f.Leg.EthExchSig), we.exchAddr) {
 				return userErr("The exchange's signature on a fill doesn't check out. Not signing it.")
 			}

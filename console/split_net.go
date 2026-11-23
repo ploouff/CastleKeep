@@ -111,6 +111,7 @@ type OpenKeysResp struct {
 	VaultID          string
 	ExchPub, ExchPay []byte
 	Delay, D2        int64
+	Anchors          bool // the exit request has a small output for each side, to speed it up (fees.go)
 }
 type OpenStartReq struct {
 	VaultID string
