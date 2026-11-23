@@ -35,7 +35,11 @@ type UTXOConfig struct {
 	PenaltyDelay int64           // D2, blocks: how long the exchange waits for its share of a published state
 	BlockMinutes float64
 	DefaultPrice int64
-	CheckForks   bool // btcd reports soft-fork status; ltcd can't
+	CheckForks   bool   // btcd reports soft-fork status; ltcd can't
+	DataDir      string // keep the chain here between runs ("" = a temporary folder, removed on Stop)
+	RPCPort      int    // fixed RPC port (0 = any free port)
+	Network      string // "" for a private regtest chain, or "signet" (Bitcoin's public test network)
+	AddrIndex    bool   // run the node with an address index (always on for signet)
 }
 
 type utxo struct {
@@ -62,6 +66,7 @@ type UTXOEngine struct {
 	miner   *btcec.PrivateKey
 	minerPk []byte
 	nextCB  int64
+	kept    int64 // kept chains: blocks already in blocks.txt
 
 	userWallet, exchWallet *btcec.PrivateKey
 	userPk, exchPk         []byte
@@ -126,21 +131,38 @@ func (e *UTXOEngine) Start() {
 }
 
 func (e *UTXOEngine) start() error {
+	var err error
+	if e.cfg.DataDir != "" {
+		e.dir = e.cfg.DataDir
+		if err := e.loadMiner(); err != nil {
+			return err
+		}
+	} else if e.dir, err = os.MkdirTemp("", "castlekeep-"+e.cfg.Info.ID+"-"); err != nil {
+		return err
+	}
 	addr, err := btcutil.NewAddressTaproot(e.minerPk[2:], &e.cfg.Params)
 	if err != nil {
 		return err
 	}
-	e.dir, err = os.MkdirTemp("", "castlekeep-"+e.cfg.Info.ID+"-")
-	if err != nil {
-		return err
+	port := e.cfg.RPCPort
+	if port == 0 {
+		port = freePort()
 	}
-	rpcAddr := fmt.Sprintf("127.0.0.1:%d", freePort())
+	rpcAddr := fmt.Sprintf("127.0.0.1:%d", port)
 	e.rpcAddr = rpcAddr
-	e.node = exec.Command(e.cfg.NodePath, "--regtest", "--notls", "--txindex",
-		"--datadir="+filepath.Join(e.dir, "data"), "--logdir="+filepath.Join(e.dir, "logs"),
+	args := []string{"--regtest", "--notls", "--txindex",
+		"--datadir=" + filepath.Join(e.dir, "data"), "--logdir=" + filepath.Join(e.dir, "logs"),
 		"--rpcuser=castlekeep", "--rpcpass=castlekeep",
-		"--rpclisten="+rpcAddr, fmt.Sprintf("--listen=127.0.0.1:%d", freePort()),
-		"--miningaddr="+addr.EncodeAddress())
+		"--rpclisten=" + rpcAddr, fmt.Sprintf("--listen=127.0.0.1:%d", freePort()),
+		"--miningaddr=" + addr.EncodeAddress()}
+	if e.signet() {
+		// The public signet: no mining here; the address index finds coins
+		// that people send to the exchange and the wallets.
+		args = append([]string{"--signet", "--addrindex"}, args[1:len(args)-1]...)
+	} else if e.cfg.AddrIndex {
+		args = append(args, "--addrindex")
+	}
+	e.node = exec.Command(e.cfg.NodePath, args...)
 	if err := e.node.Start(); err != nil {
 		return fmt.Errorf("couldn't start %s: %v", e.cfg.NodeName, err)
 	}
@@ -160,6 +182,22 @@ func (e *UTXOEngine) start() error {
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	if e.signet() {
+		return e.waitSynced()
+	}
+	if e.cfg.DataDir != "" {
+		if err := e.replayBlocks(); err != nil {
+			return err
+		}
+	}
+	if h, _ := e.rpc.GetBlockCount(); e.cfg.DataDir != "" && h >= 500 {
+		// A kept chain from an earlier run: carry on from where it was.
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		e.log("info", "Test chain resumed", fmt.Sprintf("Kept from the last run, at block %d.", h), "")
+		e.progress, e.ready = "Ready", true
+		return nil
+	}
 	const total = 500
 	for done := 0; done < total; done += 50 {
 		e.mu.Lock()
@@ -195,6 +233,9 @@ func (e *UTXOEngine) start() error {
 	if _, err := e.rpc.Generate(1); err != nil {
 		return err
 	}
+	if err := e.keepBlocks(); err != nil {
+		return err
+	}
 	e.log("info", "Your wallet has 2 test "+e.cfg.Info.Ticker, "Lock some into a vault to start trading.", "")
 	e.progress = "Ready"
 	e.ready = true
@@ -203,10 +244,21 @@ func (e *UTXOEngine) start() error {
 
 func (e *UTXOEngine) Stop() {
 	if e.node != nil && e.node.Process != nil {
+		done := make(chan struct{})
+		go func() { e.node.Wait(); close(done) }()
+		if e.cfg.DataDir != "" && e.rpc != nil {
+			// A kept chain: ask the node to shut down cleanly first.
+			e.rpc.RawRequest("stop", nil)
+			select {
+			case <-done:
+			case <-time.After(20 * time.Second):
+			}
+		}
 		e.node.Process.Kill()
-		e.node.Wait()
+		<-done
+		e.node = nil // stopping twice is harmless
 	}
-	if e.dir != "" {
+	if e.dir != "" && e.cfg.DataDir == "" {
 		os.RemoveAll(e.dir)
 	}
 }
@@ -417,6 +469,7 @@ func (e *UTXOEngine) faucetTo(to []byte, amt int64, label, okTitle string) error
 		return err
 	}
 	e.nextCB++
+	e.saveMiner()
 	txs := blk.Tx
 	if len(txs) == 0 {
 		txs = blk.RawTx
@@ -454,10 +507,16 @@ func (e *UTXOEngine) faucetTo(to []byte, amt int64, label, okTitle string) error
 }
 
 func (e *UTXOEngine) mine(n int) error {
+	if e.signet() {
+		return userErr("On signet, blocks come by themselves about every 10 minutes. Nothing can be mined here.")
+	}
 	if n < 1 || n > 2000 {
 		return userErr("Mine between 1 and 2,000 blocks at a time.")
 	}
 	if _, err := e.rpc.Generate(uint32(n)); err != nil {
+		return err
+	}
+	if err := e.keepBlocks(); err != nil {
 		return err
 	}
 	word := "blocks"
@@ -1150,6 +1209,9 @@ func (e *UTXOEngine) RPCAddr() string {
 func (e *UTXOEngine) Faucet(script []byte, amt int64) (wire.OutPoint, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.signet() {
+		return wire.OutPoint{}, userErr("Signet has no built-in faucet: get free signet coins from a public signet faucet and send them to the address shown.")
+	}
 	if !e.ready {
 		return wire.OutPoint{}, userErr("The %s test chain is still starting up.", e.cfg.Info.Name)
 	}

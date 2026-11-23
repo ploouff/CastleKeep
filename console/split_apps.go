@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -47,6 +48,7 @@ func listen(port int) (net.Listener, string) {
 type ChainStatus struct {
 	ID, RPC, Progress string
 	Ready             bool
+	Network           string       // "" (private regtest) or "signet"
 	Eth               *EthEndpoint // Ethereum only: node, contract and exit window
 }
 type FaucetReq struct {
@@ -71,16 +73,65 @@ func runChains(args []string) {
 	btcd := fs.String("btcd", goBin("btcd"), "path to btcd")
 	ltcd := fs.String("ltcd", goBin("ltcd"), "path to ltcd")
 	ethRPC := fs.String("eth-rpc", "http://127.0.0.1:8545", "the Ethereum test node (Hardhat), or \"\" to leave Ethereum out")
+	data := fs.String("data", "", "folder that keeps the test chains between runs (default: castlekeep-data/chains, or chains-signet)")
+	network := fs.String("network", "regtest", "regtest (private test chains) or signet (Bitcoin's public test network, Bitcoin only)")
+	fresh := fs.Bool("fresh", false, "start new test chains (the old folder is renamed, not deleted)")
 	fs.Parse(args)
 
-	engines := map[string]*UTXOEngine{"btc": NewUTXOEngine(btcConfig(*btcd)), "ltc": NewUTXOEngine(ltcConfig(*ltcd))}
+	signet := *network == "signet"
+	if !signet && *network != "regtest" {
+		fmt.Println("-network must be regtest or signet.")
+		os.Exit(1)
+	}
+	if *data == "" {
+		*data = filepath.Join(DataDir(), map[bool]string{false: "chains", true: "chains-signet"}[signet])
+	}
+	if *fresh && signet {
+		fmt.Println("Signet is a public network, so there's nothing to start fresh. (Use -fresh on the exchange and wallets instead.)")
+		os.Exit(1)
+	}
+	if *fresh {
+		if old, err := setAside(*data); err != nil {
+			fmt.Println("Couldn't move the old chains folder aside:", err)
+			os.Exit(1)
+		} else if old != "" {
+			fmt.Println("Started fresh. The old chains are in", old)
+		}
+	}
+	bc, lc := btcConfig(*btcd), ltcConfig(*ltcd)
+	// Kept between runs, on fixed ports, so the exchange and wallets can
+	// reconnect after the chains restart.
+	keepChain(&bc, filepath.Join(*data, "btc"), *port+1)
+	keepChain(&lc, filepath.Join(*data, "ltc"), *port+2)
+	engines := map[string]*UTXOEngine{"btc": NewUTXOEngine(bc), "ltc": NewUTXOEngine(lc)}
+	if signet {
+		// Bitcoin only: Litecoin has no signet, and Ethereum's public test
+		// networks aren't supported yet.
+		sc := signetConfig(*btcd)
+		sc.DataDir, sc.RPCPort = filepath.Join(*data, "btc"), *port+1
+		engines = map[string]*UTXOEngine{"btc": NewUTXOEngine(sc)}
+		*ethRPC = ""
+	}
 	for _, e := range engines {
 		e.Start()
 	}
 	var ee *EthEngine
 	if *ethRPC != "" && ethNodeUp(*ethRPC) {
-		ee = NewEthEngine(ethConfig("", *ethRPC))
+		ec := ethConfig("", *ethRPC)
+		ethFile := filepath.Join(*data, "eth.json")
+		ec.Contract = keptContract(ethFile)
+		ee = NewEthEngine(ec)
 		ee.Start()
+		go func() {
+			// Remember the contract, so the next run uses the same one while
+			// the Ethereum node keeps running.
+			for !ee.Snapshot().Ready {
+				time.Sleep(time.Second)
+			}
+			if err := saveContract(ethFile, ee.Endpoint().Contract); err != nil {
+				fmt.Println("Couldn't save the contract address:", err)
+			}
+		}()
 	} else if *ethRPC != "" {
 		fmt.Println("No Ethereum node at", *ethRPC, "- running Bitcoin and Litecoin only. Start Hardhat first to include Ethereum.")
 	}
@@ -103,7 +154,7 @@ func runChains(args []string) {
 		var out []ChainStatus
 		for id, e := range engines {
 			s := e.Snapshot()
-			out = append(out, ChainStatus{ID: id, RPC: e.RPCAddr(), Progress: s.Progress, Ready: s.Ready})
+			out = append(out, ChainStatus{ID: id, RPC: e.RPCAddr(), Progress: s.Progress, Ready: s.Ready, Network: e.cfg.Network})
 		}
 		if ee != nil {
 			s := ee.Snapshot()
@@ -147,31 +198,52 @@ func runChains(args []string) {
 	ln, url := listen(*port)
 	fmt.Println("Castlekeep test chains (test networks only)")
 	fmt.Println("Chains service:", url)
-	fmt.Println("Mining the first blocks takes about a minute. Next, in another window:  go run . exchange")
+	fmt.Println("Kept in:", *data, "(start with -fresh for new chains)")
+	if signet {
+		fmt.Println("Bitcoin signet: the first start downloads the signet chain (a few GB; it can take hours).")
+		fmt.Println("When it says Ready, in another window:  go run . exchange")
+	} else {
+		fmt.Println("The first start mines test blocks (about a minute). Next, in another window:  go run . exchange")
+	}
+	if signet {
+		go func() {
+			last := ""
+			for range time.Tick(30 * time.Second) {
+				if p := engines["btc"].Snapshot().Progress; p != last {
+					fmt.Println(p)
+					last = p
+				}
+			}
+		}()
+	}
 	fmt.Println("Press Ctrl+C here to stop the nodes.")
 	http.Serve(ln, m)
 }
 
 // waitChains waits until the chains service reports every chain ready. It
-// returns the Bitcoin and Litecoin RPC addresses, and Ethereum's endpoint
-// when the chains service runs it.
-func waitChains(url string) (map[string]string, *EthEndpoint) {
+// returns the Bitcoin and Litecoin settings and RPC addresses, and Ethereum's
+// endpoint when the chains service runs it.
+func waitChains(url string) (map[string]UTXOConfig, map[string]string, *EthEndpoint) {
 	fmt.Println("Waiting for the test chains at", url, "…")
 	for {
 		var st []ChainStatus
 		if err := call(url, "/chains", empty{}, &st); err == nil && len(st) > 0 {
-			rpc, ready := map[string]string{}, true
+			rpc, ready, cfgs := map[string]string{}, true, map[string]UTXOConfig{}
 			var ep *EthEndpoint
 			for _, c := range st {
 				if c.ID == "eth" {
 					ep = c.Eth
 				} else {
 					rpc[c.ID] = c.RPC
+					cfgs[c.ID] = splitConfigs()[c.ID]
+					if c.Network == "signet" {
+						cfgs[c.ID] = signetConfig(goBin("btcd"))
+					}
 				}
 				ready = ready && c.Ready
 			}
 			if ready {
-				return rpc, ep
+				return cfgs, rpc, ep
 			}
 		}
 		time.Sleep(2 * time.Second)
@@ -195,6 +267,7 @@ type XVaultView struct {
 type XChainView struct {
 	ID, Ticker, Mode string
 	Price, Wallet    int64
+	Address          string // signet: where to send coins to the exchange's wallet
 }
 type XStateResp struct {
 	Chains []XChainView
@@ -226,7 +299,10 @@ func (x *Exchange) state(empty) (XStateResp, error) {
 				bal += a
 			}
 		}
-		out.Chains = append(out.Chains, XChainView{id, xc.cfg.Info.Ticker, xc.mode, xc.price, bal})
+		out.Chains = append(out.Chains, XChainView{id, xc.cfg.Info.Ticker, xc.mode, xc.price, bal, ""})
+		if xc.cfg.Network == "signet" {
+			out.Chains[len(out.Chains)-1].Address = address(xc.pay, &xc.cfg.Params)
+		}
 	}
 	sort.Slice(out.Chains, func(i, j int) bool { return out.Chains[i].ID < out.Chains[j].ID })
 	for _, v := range x.vaults {
@@ -252,15 +328,29 @@ func runExchange(args []string) {
 	chains := fs.String("chains", "http://127.0.0.1:9100", "the chains service")
 	stock := fs.Int64("stock", 20, "test coins the exchange starts with on each chain")
 	noBrowser := fs.Bool("no-browser", false, "don't open the admin page")
+	data := fs.String("data", DataDir(), "folder for the exchange's saved data (exchange.json)")
+	fresh := fs.Bool("fresh", false, "start a new exchange (the old file is renamed, not deleted)")
 	fs.Parse(args)
 
-	rpc, ep := waitChains(*chains)
-	x, err := NewExchange(splitConfigs(), rpc)
+	cfgs, rpc, ep := waitChains(*chains)
+	x, err := NewExchange(cfgs, rpc)
 	if err != nil {
 		fmt.Println("Couldn't connect to the test nodes:", err)
 		os.Exit(1)
 	}
-	for id := range x.chains {
+	if ep != nil {
+		x.AttachEth(*ep, ethConfig("", "").DefaultPrice)
+	}
+	file := filepath.Join(*data, "exchange.json")
+	loaded := startFile(file, *fresh, x.Load)
+	for id, xc := range x.chains {
+		if xc.cfg.Network == "signet" {
+			fmt.Printf("Signet: send coins to the exchange's wallet at %s (from a public signet faucet). It finds them by itself.\n", address(xc.pay, &xc.cfg.Params))
+			continue
+		}
+		if loaded {
+			continue // its coins are in the saved file
+		}
 		var f FaucetResp
 		if err := call(*chains, "/faucet", FaucetReq{Chain: id, Script: x.WalletScript(id), Sats: *stock * unit}, &f); err != nil {
 			fmt.Println("Couldn't get test coins:", err)
@@ -269,13 +359,13 @@ func runExchange(args []string) {
 		x.AddCoins(id, f.Op, f.Amt)
 		call(*chains, "/mine", MineReq{Chain: id, N: 1}, nil)
 	}
-	if ep != nil {
-		addr := x.AttachEth(*ep, ethConfig("", "").DefaultPrice)
-		if err := call(*chains, "/faucet", FaucetReq{Chain: "eth", Addr: addr, Sats: *stock * unit}, nil); err != nil {
+	if ep != nil && (!loaded || fromWei(x.eth.c.balance(x.eth.addr)) < unit) {
+		if err := call(*chains, "/faucet", FaucetReq{Chain: "eth", Addr: x.eth.addr, Sats: *stock * unit}, nil); err != nil {
 			fmt.Println("Couldn't get test ETH:", err)
 			os.Exit(1)
 		}
 	}
+	x.SaveTo(file)
 	go func() {
 		for range time.Tick(time.Second) {
 			x.Tick()
@@ -291,7 +381,7 @@ func runExchange(args []string) {
 	})
 	ln, url := listen(*port)
 	fmt.Println("Castlekeep exchange server (test networks only)")
-	fmt.Printf("It holds only the exchange's keys. Its wallet has %d test coins on each chain.\n", *stock)
+	fmt.Println("It holds only the exchange's keys. Saved in:", file, "(plain text: test coins only)")
 	fmt.Println("Admin page:", url)
 	fmt.Println("Next, in another window:  go run . wallet")
 	if !*noBrowser {
@@ -309,32 +399,53 @@ func runWallet(args []string) {
 	exch := fs.String("exchange", "http://127.0.0.1:9200", "the exchange server")
 	noBrowser := fs.Bool("no-browser", false, "don't open the browser automatically")
 	name := fs.String("name", "", "a name for this wallet, e.g. alice (run a second wallet with -name bob -port 9301)")
+	data := fs.String("data", DataDir(), "folder for the wallet's saved data")
+	fresh := fs.Bool("fresh", false, "start a new wallet with new keys (the old file is renamed, not deleted)")
 	fs.Parse(args)
+	if !validName(*name) {
+		fmt.Println("Use only letters, digits, - and _ in -name.")
+		os.Exit(1)
+	}
 
-	rpc, ep := waitChains(*chains)
-	cfgs := splitConfigs()
+	cfgs, rpc, ep := waitChains(*chains)
 	w, err := NewWallet(*exch, cfgs, rpc)
 	if err != nil {
 		fmt.Println("Couldn't connect to the test nodes:", err)
 		os.Exit(1)
 	}
-	w.SetName(*name)
+	if ep != nil {
+		w.AttachEth(*ep)
+	}
+	file := filepath.Join(*data, walletFile(*name))
+	loaded := startFile(file, *fresh, w.Load)
+	if !loaded {
+		w.SetName(*name)
+	}
+	w.SaveTo(file)
 	var engines []Engine
 	for _, id := range []string{"btc", "ltc"} {
+		if _, ok := cfgs[id]; !ok {
+			continue
+		}
 		we := &walletEngine{w: w, id: id, info: cfgs[id].Info, chains: *chains, exch: *exch}
 		we.info.Model = "Separate programs: your wallet holds only your keys and checks every signature from the exchange server. " + we.info.Model
 		we.info.DualFund, we.info.TestCash = true, true
-		if err := we.Do(ActionReq{Action: "faucet"}); err == nil {
+		if cfgs[id].Network == "signet" {
+			fmt.Println("Signet: send coins to your wallet at", w.Address(id), "(from a public signet faucet).")
+		} else if loaded {
+			// its coins are in the saved file
+		} else if err := we.Do(ActionReq{Action: "faucet"}); err == nil {
 			we.Do(ActionReq{Action: "faucet"})
 			we.Do(ActionReq{Action: "mine", N: 1})
 		}
 		engines = append(engines, we)
 	}
 	if ep != nil {
-		w.AttachEth(*ep)
 		ee := &walletEthEngine{w: w, info: ethConfig("", "").Info, chains: *chains, exch: *exch}
 		ee.info.Model = "Separate programs: your wallet holds only your Ethereum key and checks the exchange's signature on every state. " + ee.info.Model
-		if ee.Do(ActionReq{Action: "faucet"}) == nil {
+		if loaded && w.EthBalance() >= unit {
+			// funded on an earlier run
+		} else if ee.Do(ActionReq{Action: "faucet"}) == nil {
 			ee.Do(ActionReq{Action: "faucet"})
 		}
 		engines = append(engines, ee)
@@ -366,6 +477,7 @@ func runWallet(args []string) {
 		fmt.Println("Wallet name:", *name)
 	}
 	fmt.Println("It holds only your keys. Exchange server:", *exch)
+	fmt.Println("Saved in:", file, "(your private keys in plain text: test coins only)")
 	fmt.Println("Open:", url)
 	if !*noBrowser {
 		openBrowser(url)
@@ -389,11 +501,21 @@ func (e *walletEngine) Stop()               {}
 func (e *walletEngine) UseAccount(*Account) {}
 
 func (e *walletEngine) Do(r ActionReq) error {
+	defer e.w.Save()
 	w := e.w
 	var err error
 	ok := ""
 	switch r.Action {
 	case "faucet":
+		if e.info.Signet {
+			var got int64
+			if got, err = w.CheckCoins(e.id); err == nil && got == 0 {
+				err = userErr("Nothing new has arrived at %s yet. Coins from a faucet show up within a few seconds; they confirm in the next block (about 10 minutes).", w.Address(e.id))
+			} else if err == nil {
+				ok = "Found " + fmtCoin(got, e.info.Ticker) + " sent to your address"
+			}
+			break
+		}
 		var f FaucetResp
 		if err = call(e.chains, "/faucet", FaucetReq{Chain: e.id, Script: w.WalletScript(e.id), Sats: unit}, &f); err == nil {
 			w.AddCoins(e.id, f.Op, f.Amt)
@@ -486,6 +608,9 @@ func (e *walletEngine) Snapshot() Snapshot {
 		s.CashCents = cr.CashCents
 	}
 	s.Who, s.Book = e.w.Name, e.w.bookSnapshot(e.id)
+	if e.info.Signet {
+		s.ReceiveAddr = e.w.Address(e.id)
+	}
 	e.w.mu.Lock()
 	defer e.w.mu.Unlock()
 	wc := e.w.chains[e.id]

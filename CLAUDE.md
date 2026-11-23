@@ -2,8 +2,10 @@
 
 Castlekeep is a prototype of self-custodial exchange settlement: the user locks coins in a
 vault that needs both the user's and the exchange's signatures, trades against it, and can
-always get out alone after an exit window. **Local test chains only.** Never use real coins,
-mainnet, or real money, and never describe the code as secure or audited (it isn't).
+always get out alone after an exit window. **Test networks only: local test chains, or
+Bitcoin's public signet** (coins with no value; the user approved signet on 2026-11-23).
+Never use real coins, mainnet, or real money, and never describe the code as secure or
+audited (it isn't).
 
 The user runs Windows with Command Prompt and prefers plain, step-by-step explanations.
 
@@ -29,6 +31,8 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | `console/split_eth.go`, `split_apps_eth.go`, `split_eth_test.go` | Ethereum in the separate programs, and its tests. |
 | `console/split_swap.go`, `split_swap_test.go` | Swaps across the three chains in the separate programs. |
 | `console/split_book.go`, `split_book_test.go` | Order book (separate programs): limit orders, matching (best price, then oldest), reservations, fills each wallet checks against its own order before signing. Page: the "Order book" panel in `index.html` (only shown when the snapshot has `book`), actions `place`/`cancel` via `bookAction`; several wallets with `go run . wallet -name bob -port 9301`. |
+| `console/split_save.go`, `split_save_test.go` | Saving: the exchange (`exchange.json`) and each wallet (`wallet-<name>.json`) save only inputs (keys, amounts, signatures, secrets, some tx hex) after every request/tick and rebuild scripts and txs on `Load`. Half-done steps (`pend`) are dropped. Files are refused if made on another chain (`chainConn.tag` = hash of block 1). Kept chains: `keepChain`, `keepBlocks`/`replayBlocks`, `miner.json`, `eth.json` (kept contract). Flags `-data`, `-fresh` (renames old data, never deletes). Default folder `%USERPROFILE%\castlekeep-data`. |
+| `console/split_signet.go` | Bitcoin signet: `go run . chains -network signet` (Bitcoin only; btcd with `--signet --addrindex`, data in `castlekeep-data\chains-signet`). No mining or faucet; exchange and wallets find coins sent to their addresses with `searchrawtransactions` (`coinsTo`, every 15 s, or the page's "Check for coins" button). |
 | `TESTING.md` | How to run the tests and try each feature by hand. |
 | `prototype/` | Original Bitcoin CLI demo (separate Go module). |
 | `solana/` | Untested Anchor design. Not compiled. |
@@ -81,7 +85,9 @@ split, wallet signs, exchange signs; settle signature only for the latest state,
 which the exchange stops trading on that vault; same rule on BTC/LTC). Swaps: `split_swap.go` (`/v1/swap` prepares
 both sides, signs the buying side first and takes its price from cash; the wallet checks
 prices and both splits, completes the buying side, then the selling side, which credits
-the sale). No steal demo there.
+the sale). No steal demo there. All three programs keep their data between runs (see
+`split_save.go`); BTC/LTC RPC is on fixed ports (chains port + 1, + 2) so the others can
+reconnect after the chains restart. Bitcoin signet: `split_signet.go`.
 
 **Ethereum (`eth.go`, `CastleVault.sol`)**: both sides sign every state (nonce = state
 index). Settling (`settle`) needs both signatures on a separate `settleHash`
@@ -152,6 +158,15 @@ malicious.
   confirms until something calls `evm_mine`. Clock skips (`evm_increaseTime`) are permanent
   on that node.
 - Fees are flat (`txFee = 1000` base units) on BTC/LTC.
+- **btcd and ltcd delete a regtest chain every time they start** (`removeRegressionDB`).
+  Kept chains therefore stay on regtest and replay `blocks.txt` with `submitblock` on start.
+  Don't switch them to simnet: ltcd's simnet stops mining at block 100 with no error.
+- btcd's `getblock` wants verbosity `0` (a number) for raw hex; `keepBlocks` falls back to `false`.
+- rpcclient retries for ~20 s against a node that's gone; `UTXOEngine.Stop` sets `e.node = nil`
+  so a second Stop doesn't hang.
+- Windows Defender has flagged a `go build` copy of the console (`ck.exe`) as "potentially unwanted"
+  and stopped it mid-run (the signet node kept running on its own). Use `go run .`, and stop a
+  leftover node with its `stop` RPC. Don't change Defender settings.
 - `Do` errors wrapped with `userErr` are shown to the user; refused transactions are
   *not* Go errors: they appear as `TxInfo.Status == "rejected"` plus a "bad" event.
 

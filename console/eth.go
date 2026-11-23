@@ -37,6 +37,7 @@ type EthConfig struct {
 	InstallHint  string
 	ExitDelay    int64 // seconds
 	DefaultPrice int64
+	Contract     string // reuse this deployed contract if it is still on the node
 }
 
 type ethState struct {
@@ -444,28 +445,35 @@ func (e *EthEngine) start() error {
 	}
 	e.faucetAddr = accts[0]
 
-	// Deploy the contract.
-	hash, err := e.callStr("eth_sendTransaction", map[string]string{
-		"from": e.faucetAddr, "data": "0x" + strings.TrimSpace(castleVaultBin), "gas": "0x2dc6c0"})
-	if err != nil {
-		return fmt.Errorf("couldn't deploy the contract: %v", err)
+	// Deploy the contract, unless a kept one (cfg.Contract) is still on the node.
+	if e.cfg.Contract != "" {
+		if code, err := e.callStr("eth_getCode", e.cfg.Contract, "latest"); err == nil && len(code) > 2 {
+			e.contract = e.cfg.Contract
+		}
 	}
-	if _, err := e.call("evm_mine"); err != nil {
-		return err
+	if e.contract == "" {
+		hash, err := e.callStr("eth_sendTransaction", map[string]string{
+			"from": e.faucetAddr, "data": "0x" + strings.TrimSpace(castleVaultBin), "gas": "0x2dc6c0"})
+		if err != nil {
+			return fmt.Errorf("couldn't deploy the contract: %v", err)
+		}
+		if _, err := e.call("evm_mine"); err != nil {
+			return err
+		}
+		rr, err := e.call("eth_getTransactionReceipt", hash)
+		if err != nil {
+			return err
+		}
+		var rc struct {
+			ContractAddress string `json:"contractAddress"`
+			Status          string `json:"status"`
+		}
+		json.Unmarshal(rr, &rc)
+		if rc.Status != "0x1" || rc.ContractAddress == "" {
+			return errors.New("contract deployment failed")
+		}
+		e.contract = rc.ContractAddress
 	}
-	rr, err := e.call("eth_getTransactionReceipt", hash)
-	if err != nil {
-		return err
-	}
-	var rc struct {
-		ContractAddress string `json:"contractAddress"`
-		Status          string `json:"status"`
-	}
-	json.Unmarshal(rr, &rc)
-	if rc.Status != "0x1" || rc.ContractAddress == "" {
-		return errors.New("contract deployment failed")
-	}
-	e.contract = rc.ContractAddress
 
 	// Fund and unlock the two parties.
 	for _, a := range []struct {
@@ -481,7 +489,7 @@ func (e *EthEngine) start() error {
 	}
 	e.call("evm_mine")
 	e.exchStart = e.balance(e.exchAddr)
-	e.log("info", "Test chain ready", fmt.Sprintf("CastleVault contract deployed at %s on a local %s node.", e.contract, map[string]string{"anvil": "Anvil", "hardhat": "Hardhat"}[e.client]), "")
+	e.log("info", "Test chain ready", fmt.Sprintf("CastleVault contract at %s on a local %s node.", e.contract, map[string]string{"anvil": "Anvil", "hardhat": "Hardhat"}[e.client]), "")
 	e.log("info", "Your wallet has 2 test ETH", "Lock some into a vault to start trading. Gas fees come out of your wallet, as on the real network.", "")
 	e.progress = "Ready"
 	e.ready = true

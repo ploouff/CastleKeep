@@ -191,6 +191,59 @@ The admin page shows every open order, by account, and the recent trades.
 Not in the separate programs: the "Have the exchange try to steal" demo (the exchange's keys aren't in your wallet to try it with). Ctrl+C in the chains window
 stops the test nodes.
 
+### Saved between runs
+
+The three programs keep everything in `%USERPROFILE%\castlekeep-data`, so you can close
+them and carry on later:
+
+- `chains\` keeps the Bitcoin and Litecoin test chains. (btcd and ltcd wipe a private test
+  chain every time they start, so the chains program saves each block it mines and feeds
+  them back in when it starts again. The node checks every block again.) While Hardhat
+  keeps running, the same Ethereum contract is used again too.
+- `exchange.json` holds the exchange's keys, its coins, every vault with its signed
+  states and secrets, cash balances, prices and the order books.
+- `wallet-alice.json` (one per wallet name) holds your keys, revocation secrets, vaults
+  and orders.
+
+These files hold private keys in plain text. That's fine for test coins only.
+
+Anything half-done when a program stopped (for example an order waiting for the second
+signature) is dropped, and the other side just asks again. On the private test chains,
+transactions still waiting for a block when the chains window closes are lost too, so mine
+a block before closing it. If Hardhat was restarted, its
+Ethereum vaults are gone with it, and the programs say so.
+
+To start over, add `-fresh` (for example `go run . chains -fresh`). The old data is
+renamed (`… .old-<date>`), never deleted. If you start the chains fresh, start the exchange
+and the wallets with `-fresh` too: they refuse a file made on different chains. Use
+`-data <folder>` to keep the files somewhere else.
+
+### Bitcoin signet (public test network)
+
+Signet is Bitcoin's public test network: real blocks about every 10 minutes, made by the
+network, and coins with no value. Bitcoin only (Litecoin has no signet).
+
+```
+go run . chains -network signet
+go run . exchange
+go run . wallet -name alice
+```
+
+- The first `chains -network signet` downloads the signet chain into
+  `castlekeep-data\chains-signet` (a few GB; it can take hours). The window shows how far
+  it has got. Later starts only catch up.
+- There's no Mine button and no built-in faucet. Each wallet page shows **your signet
+  address**: get free coins from a public signet faucet (search the web for "signet
+  faucet") and send them there, then press **Check for coins sent to your address**.
+  The wallet also looks by itself every 15 seconds.
+- The exchange's admin page shows the exchange's signet address. Send it coins too if you
+  want to buy into a vault (buying capacity comes from its wallet).
+- Everything waits for real blocks: a lock confirms in about 10 minutes, the cheat window
+  is 6 blocks (about an hour), and the exit window is 144 blocks (about a day). The
+  watchtowers keep running while the programs are open, and everything is saved if you
+  close them.
+- Anything you send on signet is public, like on the real network.
+
 ## The screen
 
 | Area | What it does |

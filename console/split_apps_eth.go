@@ -29,7 +29,7 @@ func (x *Exchange) ethAdminView(out *XStateResp) {
 	if x.eth == nil {
 		return
 	}
-	out.Chains = append(out.Chains, XChainView{"eth", "ETH", x.eth.mode, x.eth.price, fromWei(x.eth.c.balance(x.eth.addr))})
+	out.Chains = append(out.Chains, XChainView{"eth", "ETH", x.eth.mode, x.eth.price, fromWei(x.eth.c.balance(x.eth.addr)), ""})
 	for id, v := range x.ethVaults {
 		if len(v.states) == 0 {
 			continue
@@ -61,6 +61,7 @@ func (e *walletEthEngine) Stop()               {}
 func (e *walletEthEngine) UseAccount(*Account) {}
 
 func (e *walletEthEngine) Do(r ActionReq) error {
+	defer e.w.Save()
 	w := e.w
 	var err error
 	ok := ""

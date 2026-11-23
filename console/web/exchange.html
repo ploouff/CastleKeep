@@ -67,6 +67,7 @@ async function refresh() {
     if (!editing) $("chains").innerHTML = (s.Chains || []).map(c => `
       <div>
         <div class="muted">${esc(c.Ticker)} · exchange wallet ${esc(coin(c.Wallet, c.Ticker))}</div>
+        ${c.Address ? `<div class="muted">Signet: send coins to the exchange's wallet at <span class="mono" style="user-select:all;word-break:break-all">${esc(c.Address)}</span></div>` : ""}
         <div class="big">${usd(c.Price)}</div>
         <div class="row"><input type="number" min="1" placeholder="New price" data-price="${esc(c.ID)}" aria-label="New ${esc(c.Ticker)} price">
           <button class="btn" data-setprice="${esc(c.ID)}">Set price</button></div>

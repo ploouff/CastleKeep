@@ -117,7 +117,9 @@ This is a proof of concept, not a product.
 - **Spot trading only.** There's no leverage, because losses must never exceed what's locked.
 - **Only the coins are self-custodied.** The shared cash balance sits with the exchange as normal.
 - **Flat fees**, no fee bumping. The order book between users exists only in the separate
-  programs, keeps orders in memory, and has no trading fee.
+  programs and has no trading fee.
+- **Saved data is plain text.** The separate programs save keys and revocation secrets
+  unencrypted in `castlekeep-data`, which is only acceptable for test coins.
 
 ## Roadmap
 
@@ -129,9 +131,10 @@ This is a proof of concept, not a product.
 - [x] Two-way revocation and exchange-funded buying on Bitcoin and Litecoin
 - [x] Separate exchange and wallet programs
 - [x] Order book between several users (separate programs)
+- [x] Save the exchange, wallets and test chains between runs
 - [ ] Compile and test the Solana program
 - [ ] Deploy the Ethereum contract to EVM networks (Polygon, Arbitrum, Base)
-- [ ] Run on signet, Bitcoin's public test network
+- [x] Run on signet, Bitcoin's public test network (separate programs, Bitcoin only)
 - [ ] MuSig2 key-path settlements (cheaper and more private)
 - [ ] Real fee estimation and fee bumping
 - [ ] Lightning-channel version for near-instant deposits and withdrawals

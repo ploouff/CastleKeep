@@ -241,6 +241,10 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <p class="sub">Coins only you control.</p>
     <div class="figure" id="wallet">–</div>
     <p class="hint" id="walletPending"></p>
+    <div id="recvBox" hidden>
+      <p class="hint" style="margin:8px 0 4px">Your signet address. Get free signet coins from a public signet faucet (search "signet faucet") and send them here. They have no value.</p>
+      <p class="mono small" id="recvAddr" style="word-break:break-all;background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:6px 8px;margin:0;user-select:all"></p>
+    </div>
     <button class="btn block" id="faucet" style="margin-top:12px">Get 1 test coin</button>
     <hr class="divider">
     <label for="lockAmt">Lock into a new vault</label>
@@ -387,6 +391,12 @@ const modeText = {
 };
 
 function recipes(c) {
+  if (c.signet) return [
+    ["Get signet coins", "Copy your signet address (under Your wallet), get coins from a public signet faucet, and press \"Check for coins sent to your address\". Send some to the exchange's address too (on its admin page) if you want to buy."],
+    ["A normal trade", "Lock 0.002 and wait for the next block (about 10 minutes). Sell 0.001, then settle. Your coins come back in the next block."],
+    ["Buy into the vault", "Once the exchange's wallet has coins, ask it to lock some in your vault, wait a block, add test cash, then buy."],
+    ["The exchange disappears", "Set the exchange to offline and request an exit. The exit window is 144 blocks, about one day on signet, before you can claim alone. Your watchtower and the exchange's keep running, and everything is saved if you close the programs."]
+  ];
   const day = (c.mineButtons.find(b => /day/i.test(b.label)) || {}).label || "the 1-day button";
   const t = c.ticker;
   const eth = c.id === "eth";
@@ -480,6 +490,18 @@ function renderAccount() {
   if (S && S.ready && !busy) renderSwap();
 }
 
+// capInput stops an amount box at the most you can use (arrows and typing).
+function capInput(id, sats) {
+  const el = $(id);
+  if (!el) return;
+  if (sats == null) { el.removeAttribute("max"); return; } // nothing to go by (no vault yet)
+  const max = Math.max(0, Math.floor(sats)) / 1e8;
+  el.max = String(max);
+  if ((parseFloat(el.value) || 0) > max) el.value = String(max);
+}
+// The most you can buy: what the exchange's side holds, and what your cash pays for.
+const buyable = (exchSats, cashCents) => Math.min(exchSats, S.price > 0 ? Math.max(0, cashCents) / 100 / S.price * 1e8 : 0);
+
 function renderSwap() {
   const c = S.chain;
   const others = (A ? A.holdings : []).filter(h => h.chain !== c.id && h.ready);
@@ -487,6 +509,7 @@ function renderSwap() {
   const opts = others.map(h => `<option value="${h.chain}">into ${esc(h.ticker)}</option>`).join("");
   if (sel.dataset.opts !== opts) { sel.innerHTML = opts; sel.dataset.opts = opts; if (others.some(h => h.chain === keep)) sel.value = keep; }
   const to = others.find(h => h.chain === sel.value);
+  capInput("swapAmt", S.vault ? S.vault.userSats : null);
   const amt = parseFloat($("swapAmt").value) || 0;
   $("swapEst").textContent = to && amt > 0
     ? `You'd get about ${coinOf(Math.floor(amt * S.price / to.price * 1e8), to.ticker, 6)} (${usd(amt * S.price)}).`
@@ -544,7 +567,7 @@ function renderVault() {
     el.innerHTML = `<h2 id="v-h" style="font:600 22px var(--display);margin:0">Vault</h2>
       <div class="empty">
         <svg width="56" height="56" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><path d="M12 8.5v-1M12 16.5v-1M8.5 12h-1M16.5 12h-1" stroke="var(--pine)" stroke-width="1.5"/></svg>
-        <p>No vault open yet. Lock ${esc(c.ticker)} from your wallet to open one, then mine a block to confirm the deposit.</p>
+        <p>No vault open yet. Lock ${esc(c.ticker)} from your wallet to open one, then ${c.signet ? "wait for the next block (about 10 minutes)" : "mine a block"} to confirm the deposit.</p>
       </div>`;
     return;
   }
@@ -658,7 +681,7 @@ function capacityBlock(v, c) {
   return info + `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:#fff">
       <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 ? "Add more buying capacity" : "Buy more than you sell"}</label>
       <p class="hint" style="margin:0 0 8px">${how} Fee: 0.2% of the amount, taken from your share.</p>
-      <div class="field"><input id="capAmt" type="number" min="0.001" step="0.5" value="1" inputmode="decimal" aria-label="Buying capacity in ${esc(c.ticker)}">
+      <div class="field"><input id="capAmt" type="number" min="0.001" max="5" step="0.5" value="${esc(c.defaultLock)}" inputmode="decimal" aria-label="Buying capacity in ${esc(c.ticker)}">
       <button class="btn" id="capBtn">Ask the exchange to lock ${esc(c.ticker)}</button></div>
     </div>`;
 }
@@ -706,7 +729,7 @@ function renderStatic() {
   $("mineBtns").innerHTML = c.mineButtons.map((b, i) => `<button class="btn" data-mi="${i}" ${b.title ? `title="${esc(b.title)}"` : ""}>${esc(b.label)}</button>`).join("");
   $("mineBtns").querySelectorAll("button").forEach(b => b.onclick = () => { const m = c.mineButtons[+b.dataset.mi]; act({action: "mine", n: m.n || 0, secs: m.secs || 0}); });
   $("recipes").innerHTML = recipes(c).map(([h, p]) => `<div><h4>${esc(h)}</h4><p>${esc(p)}</p></div>`).join("");
-  $("faucet").textContent = `Get 1 test ${c.ticker}`;
+  $("faucet").textContent = c.signet ? "Check for coins sent to your address" : `Get 1 test ${c.ticker}`;
   $("lock").textContent = `Lock ${c.ticker}`;
   $("lockAmt").value = c.defaultLock; $("orderAmt").value = c.defaultOrder;
   $("orderUnit").textContent = c.ticker;
@@ -751,9 +774,11 @@ function render() {
   }
   renderStatic();
   $("height").textContent = "Block " + S.height.toLocaleString("en-US");
-  $("mempool").textContent = (S.chainTime ? S.chainTime + ". " : "") + (S.mempool ? `${S.mempool} waiting for a block` : "Nothing waiting for a block");
+  $("mempool").textContent = (S.chainTime ? S.chainTime + ". " : "") + (S.mempool ? `${S.mempool} waiting for a block` : "Nothing waiting for a block") + (c.signet ? ". Blocks come by themselves, about every 10 minutes" : "");
   $("wallet").textContent = coin(S.walletSats);
   $("walletPending").textContent = S.walletPending ? `Plus ${coin(S.walletPending)} waiting for a block` : (c.id === "eth" ? "Gas fees come out of this, as on the real network." : "");
+  $("recvBox").hidden = !S.receiveAddr;
+  $("recvAddr").textContent = S.receiveAddr || "";
   $("cash").textContent = usd(S.cashCents / 100);
   $("price").textContent = usd(S.price);
   $("exchWallet").textContent = (S.exchWalletSats > 0 ? "+" : S.exchWalletSats < 0 ? "−" : "") + coin(Math.abs(S.exchWalletSats));
@@ -764,6 +789,8 @@ function render() {
   $("wtHint").textContent = c.id === "eth"
     ? "It watches exits for you and submits your newest signed state if an older one shows up."
     : "It watches the chain during an exit. If the exchange publishes a state you hold the revocation secret for, it uses the secret to take the exchange's share. If your latest state pays you more than you put in, it publishes that state for you.";
+  { const v = S.vault; capInput("orderAmt", !v ? null : side === "sell" ? v.userSats : buyable(v.exchSats, S.cashCents)); }
+  capInput("lockAmt", S.walletSats);
   const amt = parseFloat($("orderAmt").value) || 0;
   $("orderEst").textContent = amt > 0 ? (side === "sell" ? `You'd receive about ${usd(amt * S.price)}.` : `That would cost about ${usd(amt * S.price)}.`) : "";
   $("order").textContent = side === "sell" ? "Sign and sell" : (c.dualFund ? "Sign and buy" : "Sign and buy back");
@@ -808,6 +835,14 @@ function renderBook() {
   setHTML("trades", tr.length
     ? `<tr><th>Time</th><th class="r">Price</th><th class="r">Amount</th></tr>` + tr.map(t => `<tr><td>${esc(t.Time)}</td><td class="r">${usd(t.Price)}</td><td class="r">${esc(coin(t.Sats, 6))}</td></tr>`).join("")
     : `<tr><td class="muted small">No trades yet.</td></tr>`);
+  { // the most you can still promise, after your other open orders
+    const v = S.vault, open = (b.Mine || []).filter(o => o.Status === "open");
+    const held = s => open.filter(o => o.Side === s).reduce((t, o) => t + o.Left, 0);
+    const heldCash = open.filter(o => o.Side === "buy").reduce((t, o) => t + o.Left / 1e8 * o.Price * 100, 0);
+    const lp = parseFloat($("lpPrice").value) || 0;
+    capInput("lpAmt", !v ? null : bside === "sell" ? v.userSats - held("sell")
+      : Math.min(v.exchSats - held("buy"), lp > 0 ? Math.max(0, S.cashCents - heldCash) / 100 / lp * 1e8 : 0));
+  }
   const p = parseFloat($("lpPrice").value) || 0, a = parseFloat($("lpAmt").value) || 0;
   $("lpEst").textContent = p > 0 && a > 0 ? (bside === "sell" ? `You'd receive ${usd(p * a)} if it all fills.` : `It would cost up to ${usd(p * a)} of cash.`) : "";
   $("lpBtn").textContent = bside === "sell" ? `Place sell order` : `Place buy order`;

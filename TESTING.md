@@ -119,6 +119,40 @@ go run . wallet -name bob -port 9301
 
 Works the same on Litecoin and Ethereum (on Ethereum, Bob asks the exchange to lock ETH).
 
+## E. Saving and restarting
+
+1. Do D up to step 3 (Alice's sell order is waiting in the book).
+2. Close all four windows (Ctrl+C, or just close them). Mine a block first if anything is
+   waiting for one: on the private chains, unconfirmed transactions are lost on a restart.
+3. Start them again, same commands, same order. The exchange and wallet windows say
+   `Carrying on from …\castlekeep-data\…`.
+4. Both pages show the same vaults, states, cash and Alice's order as before.
+5. Carry on with D step 4: Bob's buy matches Alice's saved order.
+
+To start over: add `-fresh` to all four commands. The old files are renamed, not deleted.
+
+The automatic tests `TestSave…` do the same without windows: they stop the exchange and
+both wallets mid-trade, load them from their files, check nothing changed, fill the saved
+order, and check the exchange's watchtower still catches an old state using a secret it
+saved. `TestKeptChainRestarts` stops and restarts a kept Bitcoin chain.
+
+## F. Bitcoin signet (public test network)
+
+1. In the first window: `go run . chains -network signet`. The first time it downloads the
+   signet chain (a few GB; it can take hours). Wait until it stops printing
+   "Downloading…" (the page and the other programs wait for it too).
+2. `go run . exchange` and `go run . wallet -name alice`, as in C.
+3. On Alice's page (Bitcoin signet tab), copy **your signet address**. Get coins from a
+   public signet faucet (search the web for "signet faucet"), send them to that address,
+   and press **Check for coins sent to your address**.
+4. Lock `0.002` and wait for the next block (about 10 minutes). The vault opens.
+5. Sell `0.001`, then **Settle with the exchange**. Your coins come back in the next block.
+6. To try buying into the vault, send signet coins to the exchange's address (shown on its
+   admin page) first, then ask the exchange to lock some in your vault.
+
+There's no Mine button on signet: blocks come by themselves. The exit window is 144 blocks,
+about a day.
+
 ## What a failure looks like
 
 - Automatic tests: a `--- FAIL` line with the expected and actual values.

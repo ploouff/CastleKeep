@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/txscript"
@@ -18,13 +19,14 @@ import (
 )
 
 type wChain struct {
-	id    string
-	cfg   UTXOConfig
-	c     *chainConn
-	key   *btcec.PrivateKey // wallet key
-	pay   []byte
-	coins []utxo
-	vault *wVault
+	id       string
+	cfg      UTXOConfig
+	c        *chainConn
+	key      *btcec.PrivateKey // wallet key
+	pay      []byte
+	coins    []utxo
+	vault    *wVault
+	lastScan time.Time // signet: last look for coins sent to the wallet
 }
 
 type wVault struct {
@@ -59,6 +61,10 @@ type Wallet struct {
 	chains  map[string]*wChain
 	eth     *wEth
 	orders  map[int]*wOrder
+
+	// saving (split_save.go)
+	file, saveErr string
+	lastSaved     []byte
 }
 
 func NewWallet(exchangeURL string, cfgs map[string]UTXOConfig, rpc map[string]string) (*Wallet, error) {
@@ -487,6 +493,7 @@ func (w *Wallet) Tick() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, wc := range w.chains {
+		w.scan(wc, false)
 		if v := wc.vault; v != nil {
 			w.finishSplice(wc, v)
 			w.watch(wc, v)
@@ -498,6 +505,7 @@ func (w *Wallet) Tick() {
 			w.signFills(c)
 		}
 	}
+	w.save()
 }
 
 func (w *Wallet) watch(wc *wChain, v *wVault) {

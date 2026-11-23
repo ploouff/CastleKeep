@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/txscript"
@@ -20,14 +21,15 @@ import (
 )
 
 type xChain struct {
-	id    string
-	cfg   UTXOConfig
-	c     *chainConn
-	key   *btcec.PrivateKey // the exchange's wallet key
-	pay   []byte
-	coins []utxo
-	price int64
-	mode  string // honest, offline, malicious
+	id       string
+	cfg      UTXOConfig
+	c        *chainConn
+	key      *btcec.PrivateKey // the exchange's wallet key
+	pay      []byte
+	coins    []utxo
+	price    int64
+	mode     string    // honest, offline, malicious
+	lastScan time.Time // signet: last look for coins sent to the exchange
 }
 
 type xVault struct {
@@ -75,6 +77,10 @@ type Exchange struct {
 	ethVaults map[string]*xEthVault
 	books     map[string]*book
 	orderSeq  int
+
+	// saving (split_save.go)
+	file, saveErr string
+	lastSaved     []byte
 }
 
 // NewExchange connects to each chain's node. rpc maps chain id to the
@@ -131,7 +137,13 @@ func (x *Exchange) Handler() http.Handler {
 	m.Handle("/v1/info", handle(x.info))
 	m.Handle("/v1/state", handle(x.state))
 	m.Handle("/v1/tick", handle(func(empty) (empty, error) { x.Tick(); return empty{}, nil }))
-	return m
+	// Save after every request (only writes when something changed).
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.ServeHTTP(w, r)
+		x.mu.Lock()
+		x.save()
+		x.mu.Unlock()
+	})
 }
 
 func (v *xVault) log(f string, a ...any) { v.events = append(v.events, fmt.Sprintf(f, a...)) }
@@ -539,12 +551,16 @@ func (x *Exchange) capacityFinish(r CapacityFinishReq) (CommitResp, error) {
 func (x *Exchange) Tick() {
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	for _, xc := range x.chains {
+		x.scan(xc)
+	}
 	for _, v := range x.vaults {
 		if v.opened && len(v.gens) > 0 {
 			x.watch(v, x.chains[v.chain])
 		}
 	}
 	x.ethTick()
+	x.save()
 }
 
 func (x *Exchange) watch(v *xVault, xc *xChain) {
