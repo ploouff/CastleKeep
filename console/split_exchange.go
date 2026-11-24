@@ -86,6 +86,7 @@ type Exchange struct {
 	file, saveErr string
 	lastSaved     []byte
 	seal          *sealKey // password for the file (seal.go); nil: plain text
+	kept          xSave    // saved chains this run doesn't use, written back unchanged
 }
 
 // NewExchange connects to each chain's node. rpc maps chain id to the

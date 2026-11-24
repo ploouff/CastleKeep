@@ -351,6 +351,14 @@ func (x *Exchange) record() xSave {
 			SettleTx: txRec(v.settleTx), Settling: v.settling, Published: stateIndex(v.states, v.published), PublishedBy: v.publishedBy,
 			Closed: v.closed, SweepKind: v.sweepKind, Events: v.events})
 	}
+	// Chains that aren't running this time go back into the file as they were
+	// loaded, so their keys, coins and vaults are there when they run again.
+	for id, cr := range x.kept.Chains {
+		if _, ok := s.Chains[id]; !ok {
+			s.Chains[id] = cr
+		}
+	}
+	s.Vaults = append(s.Vaults, x.kept.Vaults...)
 	sortBy(s.Vaults, func(v xVaultRec) string { return v.ID })
 	for id, xe := range x.evm {
 		er := &xEthRec{Key: keyRec(xe.key), Contract: xe.c.contract, Price: xe.price, Mode: xe.mode}
@@ -363,6 +371,14 @@ func (x *Exchange) record() xSave {
 			s.EVM = map[string]*xEthRec{}
 		}
 		s.EVM[id] = er
+	}
+	for id, er := range x.kept.EVM {
+		if _, ok := s.EVM[id]; !ok {
+			if s.EVM == nil {
+				s.EVM = map[string]*xEthRec{}
+			}
+			s.EVM[id] = er
+		}
 	}
 	for chain, b := range x.books {
 		br := bookRec{Trades: b.trades, Seq: b.seq, Orders: []orderRec{}, Legs: []legRec{}}
@@ -396,6 +412,27 @@ func (x *Exchange) Load(path string) (bool, error) {
 	}
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	if s.EVM == nil && s.Eth != nil {
+		s.Eth.Vaults = s.EthVaults
+		s.EVM = map[string]*xEthRec{"eth": s.Eth}
+	}
+	x.kept = xSave{Chains: map[string]xChainRec{}, EVM: map[string]*xEthRec{}}
+	for id, cr := range s.Chains {
+		if _, ok := x.chains[id]; !ok {
+			x.kept.Chains[id] = cr
+		}
+	}
+	for _, vr := range s.Vaults {
+		if _, ok := x.chains[vr.Chain]; !ok {
+			x.kept.Vaults = append(x.kept.Vaults, vr)
+		}
+	}
+	for id, er := range s.EVM {
+		if x.evm[id] == nil {
+			x.kept.EVM[id] = er
+		}
+	}
+	notRunning(path, x.kept.Chains, x.kept.EVM)
 	for id, cr := range s.Chains {
 		xc, ok := x.chains[id]
 		if !ok {
@@ -435,10 +472,6 @@ func (x *Exchange) Load(path string) (bool, error) {
 	}
 	if s.Cash != nil {
 		x.cash = s.Cash
-	}
-	if s.EVM == nil && s.Eth != nil {
-		s.Eth.Vaults = s.EthVaults
-		s.EVM = map[string]*xEthRec{"eth": s.Eth}
 	}
 	for chain, er := range s.EVM {
 		xe := x.evm[chain]
@@ -607,6 +640,20 @@ func (w *Wallet) record() wSave {
 		}
 		s.EVM[id] = er
 	}
+	// Chains that aren't running this time go back into the file as they were.
+	for id, cr := range w.kept.Chains {
+		if _, ok := s.Chains[id]; !ok {
+			s.Chains[id] = cr
+		}
+	}
+	for id, er := range w.kept.EVM {
+		if _, ok := s.EVM[id]; !ok {
+			if s.EVM == nil {
+				s.EVM = map[string]*wEthRec{}
+			}
+			s.EVM[id] = er
+		}
+	}
 	for _, o := range w.orders {
 		s.Orders = append(s.Orders, *o)
 	}
@@ -634,6 +681,21 @@ func (w *Wallet) Load(path string) (bool, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.Account, w.Name, w.WT = s.Account, s.Name, s.WT
+	if s.EVM == nil && s.Eth != nil {
+		s.EVM = map[string]*wEthRec{"eth": s.Eth}
+	}
+	w.kept = wSave{Chains: map[string]wChainRec{}, EVM: map[string]*wEthRec{}}
+	for id, cr := range s.Chains {
+		if _, ok := w.chains[id]; !ok {
+			w.kept.Chains[id] = cr
+		}
+	}
+	for id, er := range s.EVM {
+		if w.evm[id] == nil {
+			w.kept.EVM[id] = er
+		}
+	}
+	notRunning(path, w.kept.Chains, w.kept.EVM)
 	for id, cr := range s.Chains {
 		wc, ok := w.chains[id]
 		if !ok {
@@ -672,9 +734,6 @@ func (w *Wallet) Load(path string) (bool, error) {
 		}
 		wc.vault = v
 	}
-	if s.EVM == nil && s.Eth != nil {
-		s.EVM = map[string]*wEthRec{"eth": s.Eth}
-	}
 	for chain, er := range s.EVM {
 		we := w.evm[chain]
 		if we == nil {
@@ -705,6 +764,24 @@ func (w *Wallet) Load(path string) (bool, error) {
 		w.orders[o.ID] = &o
 	}
 	return true, nil
+}
+
+// notRunning says which saved chains aren't running this time. Their saved
+// data stays in the file unchanged (see kept), ready for when they run again.
+func notRunning[U, E any](path string, utxo map[string]U, evm map[string]E) {
+	var names []string
+	for id := range utxo {
+		names = append(names, strings.ToUpper(id))
+	}
+	for id := range evm {
+		names = append(names, evmName(id))
+	}
+	if len(names) == 0 {
+		return
+	}
+	sort.Strings(names)
+	fmt.Printf("Not running this time: %s. Their saved keys, coins and vaults stay in %s for when they run again.\n",
+		strings.Join(names, ", "), filepath.Base(path))
 }
 
 // sortBy sorts a slice by a string key, so saved files keep a stable order.

@@ -260,6 +260,10 @@ transactions still waiting for a block when the chains window closes are lost to
 a block before closing it. With `-eth-rpc`, Ethereum lives in your own Hardhat window
 instead: if that was restarted, its vaults are gone with it, and the programs say so.
 
+If the chains program runs fewer networks than last time (for example
+`chains -network testnets -coins eth` after using signet), the exchange and wallets say
+which ones aren't running and keep their saved keys, coins and vaults in the file
+unchanged, ready for when those networks run again.
 
 To start over, add `-fresh` (for example `go run . chains -fresh`). The old data is
 renamed (`… .old-<date>`), never deleted. If you start the chains fresh, start the exchange
