@@ -207,7 +207,8 @@ signing is saved, and that vaults opened without MuSig2 still use the script. By
 
 1. Open a Bitcoin vault (console or separate programs), trade, then **Settle with the
    exchange** and mine a block.
-2. In **Transactions**, open the settlement: it says "Key path: one MuSig2 signature…".
+2. In **Activity**, click **Inspect transaction** under "Cooperative settlement": the
+   Transaction inspector says "Key path: one MuSig2 signature…".
 3. Under **Show the vault's scripts**, the first entry is the combined key; the scripts below
    it are the hidden backup paths.
 
