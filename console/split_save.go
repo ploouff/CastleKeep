@@ -88,6 +88,7 @@ type defRec struct {
 	User, Exch, UserPay, ExchPay []byte
 	Delay, D2                    int64
 	Anchors                      bool `json:",omitempty"`
+	MuSig2                       bool `json:",omitempty"`
 }
 
 type genRec struct {
@@ -112,7 +113,7 @@ type vaultRec struct {
 }
 
 func saveVault(d *vaultDef, gens []*vgen, states []*pstate) vaultRec {
-	r := vaultRec{Def: defRec{d.user, d.exch, d.userPay, d.exchPay, d.delay, d.d2, d.anchors}}
+	r := vaultRec{Def: defRec{d.user, d.exch, d.userPay, d.exchPay, d.delay, d.d2, d.anchors, d.musig}}
 	for _, g := range gens {
 		r.Gens = append(r.Gens, genRec{g.vaultOut, g.vaultAmt, g.userDep, g.exchDep, g.exitSigU, g.exitSigX, g.refundSigU, g.refundSigX})
 	}
@@ -130,6 +131,9 @@ func (r vaultRec) load() (*vaultDef, []*vgen, []*pstate, error) {
 		return nil, nil, nil, err
 	}
 	d.anchors = r.Def.Anchors
+	if err := d.setMuSig2(r.Def.MuSig2); err != nil {
+		return nil, nil, nil, err
+	}
 	var gens []*vgen
 	for _, gr := range r.Gens {
 		g := d.buildGen(gr.Out, gr.Amt, gr.UserDep, gr.ExchDep)

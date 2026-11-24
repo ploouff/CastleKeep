@@ -310,7 +310,9 @@ func runSplit(t *testing.T, chain string) {
 		s.open()
 		// The exchange signed a settlement of state #0. If it kept trading, the
 		// wallet could broadcast that old settlement later.
-		s.ok(call(s.w.base, "/v1/settle", SettleReq{s.vault().id}, &SettleResp{}))
+		n, err := newMusigNonce(s.vault().key)
+		s.ok(err)
+		s.ok(call(s.w.base, "/v1/settle", SettleReq{VaultID: s.vault().id, UserNonce: n.pub()}, &SettleResp{}))
 		s.refused(s.w.Order(chain, "sell", 10_000_000), "settlement was signed")
 		s.refused(s.w.Capacity(chain, oneCoin), "settlement was signed")
 	})

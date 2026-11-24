@@ -198,6 +198,19 @@ node that behaves like a public network (it mines by itself and can't send for a
    then press **Pay out after the window**.
 8. The link under your address opens your transactions on the network's block explorer.
 
+## I. MuSig2 settlements (Bitcoin and Litecoin)
+
+`go test -run MuSig2 -v` checks that settlements and splices on new vaults are a single
+64-byte signature on the chain, that a damaged partial signature from the exchange is refused
+(and settling again then works), that a nonce can't sign twice, that nothing about a half-done
+signing is saved, and that vaults opened without MuSig2 still use the script. By hand:
+
+1. Open a Bitcoin vault (console or separate programs), trade, then **Settle with the
+   exchange** and mine a block.
+2. In **Transactions**, open the settlement: it says "Key path: one MuSig2 signature…".
+3. Under **Show the vault's scripts**, the first entry is the combined key; the scripts below
+   it are the hidden backup paths.
+
 ## What a failure looks like
 
 - Automatic tests: a `--- FAIL` line with the expected and actual values.

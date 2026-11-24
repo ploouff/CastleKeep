@@ -23,6 +23,26 @@ node, or the CastleVault smart contract on an EVM test node) decides whether eac
 | **Ethereum** | `CastleVault` smart contract (`contract/CastleVault.sol`). Both sides sign every state. The exchange can lock its own ETH so you can buy from it. | 24 hours on the chain's clock | **Closed:** during an exit only a state with a higher number can replace an older one, and your watchtower submits the newest |
 | **Polygon, Base, BNB Chain, Avalanche** | The same `CastleVault` contract and code as Ethereum, each on its own local test node with the chain ID of that network's public test network (Amoy 80002, Base Sepolia 84532, BNB testnet 97, Fuji 43113). Coins: POL, ETH (on Base), BNB, AVAX | 24 hours on the chain's clock | Closed, as on Ethereum |
 
+### MuSig2: settling looks like a normal payment (Bitcoin and Litecoin)
+
+New Bitcoin and Litecoin vaults combine your key and the exchange's into one key with
+MuSig2 (BIP 327), used as the vault output's Taproot internal key. Settling with the exchange
+and adding buying capacity (a splice) then use that key: one 64-byte signature that only
+both of you together can make. On the chain it looks like an ordinary single-key payment, so
+it is smaller (cheaper) and doesn't show that it was a vault or that two parties signed.
+
+- Nothing else changes: the exit request, the pay-back after the exit window and the
+  revocation penalties still use the scripts, which stay hidden unless they are needed.
+- Signing takes the same messages as before: your wallet sends a fresh public nonce, the
+  exchange answers with its nonce and its partial signature, and your wallet checks it, adds
+  its own and checks the final signature before broadcasting.
+- A nonce signs once: its secret half is wiped as soon as it has been used, and nonces are
+  never saved. If a program stops halfway, that attempt is dropped and started again.
+- Vaults opened before this (and vaults from an exchange that doesn't offer MuSig2) keep the
+  old 2-of-2 script path and work as before.
+- The transaction inspector says "Key path" for these spends, and the vault's scripts list
+  starts with the combined key.
+
 ### One account, and swapping coins
 
 All the chains belong to **one test account**. The bar at the top of every tab shows
@@ -382,6 +402,8 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `engine.go` | Types shared by every chain |
 | `account.go` | The shared test account (one cash balance) and coin-to-coin swaps |
 | `utxo.go`, `utxo_vault.go` | Bitcoin and Litecoin engine: Taproot scripts and transactions |
+| `musig.go` | MuSig2: the combined key, nonces, partial signatures for settling and splices |
+| `evm_public.go` | The public EVM test networks (Sepolia, Amoy, Base Sepolia, BNB Chain testnet, Fuji) |
 | `eth.go` | Ethereum engine: JSON-RPC, Keccak, signatures and contract calls |
 | `evm.go` | The EVM chains (Ethereum, Polygon, Base, BNB Chain, Avalanche): names, chain IDs, test prices, icon colours, and starting Hardhat |
 | `evm_keep.go` | Keeps the EVM test chains between runs (records changes, plays them back) |

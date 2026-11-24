@@ -773,8 +773,8 @@ func (e *walletEngine) vaultView(wc *wChain, v *wVault, height int64) *VaultView
 		PublishedBy: v.publishedBy, SweepKind: v.sweepKind, CloseKind: v.closed,
 		UserDeposit: g.userDep, ExchDeposit: g.exchDep, ExitSent: v.exitSent,
 		FundPending: v.spliceTx != nil && c.confs(v.spliceTx) == 0,
-		Scripts: []Labelled{{"Both must sign (vault and exit output)", disasm(v.def.ms.Script)},
-			{fmt.Sprintf("Pay-back of deposits, %d blocks after the exit request", v.def.delay), disasm(v.def.dl.Script)}}}
+		Scripts: append(keyPathNote(v.def.V), []Labelled{{"Both must sign (vault and exit output)", disasm(v.def.ms.Script)},
+			{fmt.Sprintf("Pay-back of deposits, %d blocks after the exit request", v.def.delay), disasm(v.def.dl.Script)}}...)}
 	if v.published != nil {
 		vv.PublishedState = v.published.Index
 	}

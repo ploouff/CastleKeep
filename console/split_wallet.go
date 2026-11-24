@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr/musig2"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -174,6 +175,9 @@ func (w *Wallet) Open(chain string, sats int64) error {
 		return userErr("The exchange sent a bad key: %v", err)
 	}
 	def.anchors = keys.Anchors
+	if err := def.setMuSig2(keys.MuSig2); err != nil {
+		return userErr("The exchange sent keys that can't be combined: %v", err)
+	}
 	fund, err := wc.buildDeposit(def.V.pkScript, sats)
 	if err != nil {
 		return err
@@ -318,17 +322,49 @@ func (w *Wallet) Settle(chain string) error {
 	if err != nil {
 		return err
 	}
-	var sr SettleResp
-	if err := call(w.base, "/v1/settle", SettleReq{v.id}, &sr); err != nil {
-		return err
-	}
 	g := v.gen()
 	tx := v.def.settleTx(g, v.latest())
 	fetch := one(v.def.V, g.vaultAmt)
-	if !checkLeafSig(tx, 0, fetch, v.def.ms, v.def.exch, sr.ExchSig) {
-		return userErr("The exchange's settlement signature doesn't check out.")
+	req := SettleReq{VaultID: v.id}
+	var nonce *musigNonce
+	if v.def.musig {
+		// A fresh nonce for this settlement only; it is never saved.
+		if nonce, err = newMusigNonce(v.key); err != nil {
+			return err
+		}
+		req.UserNonce = nonce.pub()
 	}
-	full := withBoth(tx, v.def.V, v.def.ms, signLeaf(tx, 0, fetch, v.def.ms, v.key), sr.ExchSig)
+	var sr SettleResp
+	if err := call(w.base, "/v1/settle", req, &sr); err != nil {
+		return err
+	}
+	var full *wire.MsgTx
+	if v.def.musig {
+		// Key path: check the exchange's partial signature on the
+		// settlement we built ourselves, add ours, check the result.
+		ks, err := v.def.vaultSpend(tx, 0, fetch)
+		if err != nil {
+			return err
+		}
+		theirs, ok := ks.verifyPartial(sr.ExchPartial, v.def.exch, sr.ExchNonce, req.UserNonce)
+		if !ok {
+			return userErr("The exchange's MuSig2 signature for the settlement doesn't check out.")
+		}
+		mine, err := ks.sign(v.key, nonce, sr.ExchNonce)
+		if err != nil {
+			return err
+		}
+		sig, err := ks.combine(mine, theirs)
+		if err != nil {
+			return userErr("The settlement signature doesn't check out: %v", err)
+		}
+		full = withKeySig(tx, sig)
+	} else {
+		if !checkLeafSig(tx, 0, fetch, v.def.ms, v.def.exch, sr.ExchSig) {
+			return userErr("The exchange's settlement signature doesn't check out.")
+		}
+		full = withBoth(tx, v.def.V, v.def.ms, signLeaf(tx, 0, fetch, v.def.ms, v.key), sr.ExchSig)
+	}
 	if err := wc.c.send(full); err != nil {
 		return err
 	}
@@ -415,8 +451,17 @@ func (w *Wallet) Capacity(chain string, sats int64) error {
 		return err
 	}
 	us, uh := newSecret()
+	req := CapacityReq{VaultID: v.id, Sats: sats, UHash: uh}
+	var nonce *musigNonce
+	if v.def.musig {
+		// A fresh nonce for this splice only; it is never saved.
+		if nonce, err = newMusigNonce(v.key); err != nil {
+			return err
+		}
+		req.UserNonce = nonce.pub()
+	}
 	var off CapacityOffer
-	if err := call(w.base, "/v1/capacity", CapacityReq{v.id, sats, uh}, &off); err != nil {
+	if err := call(w.base, "/v1/capacity", req, &off); err != nil {
 		return err
 	}
 	g, l := v.gen(), v.latest()
@@ -448,21 +493,50 @@ func (w *Wallet) Capacity(chain string, sats int64) error {
 	if err != nil {
 		return err
 	}
-	if !checkLeafSig(tx, 0, fetch, v.def.ms, v.def.exch, off.SpliceSig) ||
+	// The splice spends the vault: through the key path on a MuSig2 vault
+	// (the exchange's partial signature), otherwise through the 2-of-2 script.
+	var ks *keySpend
+	var theirs *musig2.PartialSignature
+	spliceOK := false
+	if v.def.musig {
+		if ks, err = v.def.vaultSpend(tx, 0, fetch); err != nil {
+			return err
+		}
+		theirs, spliceOK = ks.verifyPartial(off.SplicePartial, v.def.exch, off.SpliceNonce, req.UserNonce)
+	} else {
+		spliceOK = checkLeafSig(tx, 0, fetch, v.def.ms, v.def.exch, off.SpliceSig)
+	}
+	if !spliceOK ||
 		!checkLeafSig(ng.exitTx, 0, v.def.exitFetch(ng), v.def.ms, v.def.exch, off.ExitSig) ||
 		!checkLeafSig(ng.refundTx, 0, v.def.eFetch(ng), v.def.dl, v.def.exch, off.RefundSig) ||
 		!checkLeafSig(st.utx, 0, v.def.eFetch(ng), v.def.ms, v.def.exch, off.ExchSigU) {
 		return userErr("A signature from the exchange doesn't check out. Nothing was signed.")
 	}
 	ng.exitSigX, ng.refundSigX, st.exchSigU, st.uSecret = off.ExitSig, off.RefundSig, off.ExchSigU, us
-	spliceSig := signLeaf(tx, 0, fetch, v.def.ms, v.key)
+	commit := CapacityCommitReq{VaultID: v.id}
+	var witness wire.TxWitness
+	if v.def.musig {
+		mine, err := ks.sign(v.key, nonce, off.SpliceNonce)
+		if err != nil {
+			return err
+		}
+		sig, err := ks.combine(mine, theirs)
+		if err != nil {
+			return userErr("The splice signature doesn't check out: %v", err)
+		}
+		commit.SplicePartial, witness = encodePartial(mine), wire.TxWitness{sig}
+	} else {
+		commit.SpliceSig = signLeaf(tx, 0, fetch, v.def.ms, v.key)
+		witness = wire.TxWitness{off.SpliceSig, commit.SpliceSig, v.def.ms.Script, v.def.V.controlBlock(v.def.ms)}
+	}
 	ng.exitSigU = signLeaf(ng.exitTx, 0, v.def.exitFetch(ng), v.def.ms, v.key)
 	ng.refundSigU = signLeaf(ng.refundTx, 0, v.def.eFetch(ng), v.def.dl, v.key)
 	st.userSigE = signLeaf(st.etx, 0, v.def.eFetch(ng), v.def.ms, v.key)
-	if err := call(w.base, "/v1/capacity/commit", CapacityCommitReq{v.id, spliceSig, ng.exitSigU, ng.refundSigU, st.userSigE}, nil); err != nil {
+	commit.ExitSig, commit.RefundSig, commit.UserSigE = ng.exitSigU, ng.refundSigU, st.userSigE
+	if err := call(w.base, "/v1/capacity/commit", commit, nil); err != nil {
 		return err
 	}
-	tx.TxIn[0].Witness = wire.TxWitness{off.SpliceSig, spliceSig, v.def.ms.Script, v.def.V.controlBlock(v.def.ms)}
+	tx.TxIn[0].Witness = witness
 	v.gens = append(v.gens, ng)
 	v.states = append(v.states, st)
 	v.spliceTx, v.spliceFinished = tx, false
