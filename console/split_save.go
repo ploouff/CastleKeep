@@ -576,6 +576,7 @@ type wSave struct {
 	EVM           map[string]*wEthRec // eth, pol, base, bnb, avax
 	Eth           *wEthRec            // files saved before the other EVM chains: Ethereum only
 	Orders        []wOrder
+	Tower         *wTowerRec `json:",omitempty"` // a separate watchtower in use (split_tower.go)
 }
 
 // SaveTo makes the wallet save itself to path after every change.
@@ -619,6 +620,9 @@ func (w *Wallet) save() {
 
 func (w *Wallet) record() wSave {
 	s := wSave{Version: saveVersion, Account: w.Account, Name: w.Name, WT: w.WT, Chains: map[string]wChainRec{}, Orders: []wOrder{}}
+	if w.tower != "" {
+		s.Tower = &wTowerRec{w.tower, w.towerToken}
+	}
 	for id, wc := range w.chains {
 		cr := wChainRec{Tag: wc.c.tag(), Key: keyRec(wc.key), Coins: utxoRecs(wc.coins)}
 		if v := wc.vault; v != nil {
@@ -681,6 +685,9 @@ func (w *Wallet) Load(path string) (bool, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.Account, w.Name, w.WT = s.Account, s.Name, s.WT
+	if s.Tower != nil {
+		w.tower, w.towerToken = s.Tower.URL, s.Tower.Token
+	}
 	if s.EVM == nil && s.Eth != nil {
 		s.EVM = map[string]*wEthRec{"eth": s.Eth}
 	}

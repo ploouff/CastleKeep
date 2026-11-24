@@ -314,6 +314,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <div id="wtBox" hidden>
       <label class="switch"><input type="checkbox" id="wt"> Your watchtower is on</label>
       <p class="hint" id="wtHint">It watches exits for you and submits your newest signed state if an older one shows up.</p>
+      <p class="hint" id="towerNote" hidden></p>
     </div>
     <button class="btn danger block" id="steal" style="margin-top:12px">Have the exchange try to steal</button>
     <hr class="divider">
@@ -872,6 +873,8 @@ function render() {
   $("wtHint").textContent = c.evm
     ? "It watches exits for you and submits your newest signed state if an older one shows up."
     : "It watches the chain during an exit. If the exchange publishes a state you hold the revocation secret for, it uses the secret to take the exchange's share. If your latest state pays you more than you put in, it publishes that state for you.";
+  $("towerNote").hidden = !S.tower;
+  $("towerNote").textContent = S.tower || "";
   { const v = S.vault; capInput("orderAmt", !v ? null : side === "sell" ? v.userSats : buyable(v.exchSats, S.cashCents)); }
   capInput("lockAmt", S.walletSats);
   const amt = parseFloat($("orderAmt").value) || 0;

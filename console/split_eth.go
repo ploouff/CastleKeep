@@ -604,6 +604,10 @@ func (w *Wallet) ethAgree(we *wEth, v *wEthVault, off EthStateOffer, wantUser, t
 	}
 	v.states = append(v.states, &ethState{Index: off.Nonce, Label: off.Label, UserSats: off.UserSats, ExchSats: off.ExchSats, userSig: sig, exchSig: cr.ExchSig})
 	v.log("State #%d: %s", off.Nonce, off.Label)
+	// A separate watchtower gets the new state straight away. (Unlike on
+	// Bitcoin, an older state here is never punished, only replaced, so a
+	// trade doesn't wait for it; the next tick tries again if this fails.)
+	w.towerSend(true)
 	return nil
 }
 

@@ -292,6 +292,44 @@ higher fee, and miners take both together.
 
 The one-program console still uses a flat fee: there you mine the blocks yourself.
 
+### A separate watchtower (keeps watching while your wallet is closed)
+
+Your wallet's own watchtower only works while the wallet program runs. On Bitcoin, if the
+exchange publishes an old state while it's closed, you have 6 blocks (about an hour on
+signet) to take the exchange's share before the exchange can keep it. The watchtower program
+keeps watching for you:
+
+```
+go run . watchtower
+go run . wallet -name alice -watchtower http://127.0.0.1:9400
+```
+
+The wallet remembers the watchtower (it's saved in the wallet's file); `-watchtower off` stops
+using it and tells the watchtower to forget everything it holds for you.
+
+- **It holds no keys to your coins.** After every trade your wallet hands it transactions
+  signed in advance that can only pay you: for each state the exchange has revoked, the
+  penalty sweep that takes the exchange's share; for each generation, your copy of the newest
+  state, signed by both, when it pays you more than your deposit. On the EVM chains it holds
+  your newest state with both signatures, which anyone may submit during an exit. Its only key
+  is a fee wallet for the gas on the EVM chains (the chains program funds it on the local
+  chains; on a public network, send it a little test coin).
+- **What it does:** if the exchange publishes an old Bitcoin or Litecoin state, it sends the
+  penalty sweep. If an exit request confirms and nobody publishes a state, it publishes your
+  newest one. On the EVM chains, during an exit, it submits your newest state if the contract
+  holds an older one (or none, when yours pays you more than your deposit).
+- **Your wallet updates it before giving anything up.** On Bitcoin and Litecoin the wallet
+  hands the watchtower each new state *before* it gives the exchange its secret for the old
+  one, so the watchtower never holds a state the exchange could punish. If the watchtower
+  can't be reached, the trade (or swap) is stopped before anything is handed over, and the
+  page says so. Updates only go forward: the watchtower never swaps a newer state for an older
+  one, and it only takes updates from the wallet that signed up with it (a random token).
+- **Its page** (`http://127.0.0.1:9400`) lists each wallet's vaults, what it holds and what it
+  did. The wallet page shows a line about it under **Your watchtower is on**.
+- **Limits:** it sees your vault transactions and amounts (a real one would get them encrypted
+  until needed), and the transactions signed in advance have the flat test fee, so it can't
+  speed them up. To keep it running all the time it needs a computer that stays on.
+
 ### Bitcoin signet (public test network)
 
 Signet is Bitcoin's public test network: real blocks about every 10 minutes, made by the
@@ -418,6 +456,7 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `split_apps.go`, `web/exchange.html` | The `chains`, `exchange` and `wallet` commands, and the exchange's admin page |
 | `split_eth.go`, `split_apps_eth.go` | The EVM chains in the separate programs |
 | `split_swap.go` | Swaps in the separate programs |
+| `split_tower.go`, `web/tower.html` | The separate watchtower program and its page, and the wallet's side of it |
 
 ## Known limits
 
@@ -426,6 +465,8 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
   and your watchtower publishes your latest state if it pays you more.
 - **Revocation on Bitcoin and Litecoin only works if someone is watching.** Your watchtower
   must sweep an old state within 6 blocks (BTC) or 24 blocks (LTC). Ethereum uses state numbers.
+  In the separate programs, the watchtower program does this while your wallet is closed, as
+  long as it keeps running.
 - **Buying capacity waits for a block each time.** You can ask for more as often as you like
   (up to 5 coins per request), but only one request waits for a block at a time. On signet
   that is about 10 minutes per request.

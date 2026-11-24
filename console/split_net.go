@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -230,13 +231,18 @@ var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 // call posts req to the exchange and decodes the answer into resp.
 func call(base, path string, req, resp any) error {
+	return callAs("the exchange", httpClient, base, path, req, resp)
+}
+
+// callAs is call for any of the programs; who names it in error messages.
+func callAs(who string, client *http.Client, base, path string, req, resp any) error {
 	b, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
-	r, err := httpClient.Post(base+path, "application/json", bytes.NewReader(b))
+	r, err := client.Post(base+path, "application/json", bytes.NewReader(b))
 	if err != nil {
-		return userErr("Couldn't reach the exchange: %v", err)
+		return userErr("Couldn't reach %s: %v", who, err)
 	}
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusOK {
@@ -245,13 +251,13 @@ func call(base, path string, req, resp any) error {
 		if e.Error == "" {
 			e.Error = r.Status
 		}
-		return userErr("The exchange said: %s", e.Error)
+		return userErr("%s said: %s", strings.ToUpper(who[:1])+who[1:], e.Error)
 	}
 	if resp == nil {
 		return nil
 	}
 	if err := json.NewDecoder(r.Body).Decode(resp); err != nil {
-		return fmt.Errorf("couldn't read the exchange's answer: %w", err)
+		return fmt.Errorf("couldn't read %s's answer: %w", who, err)
 	}
 	return nil
 }

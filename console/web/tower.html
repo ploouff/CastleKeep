@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Castlekeep watchtower</title>
+<style>
+:root{--paper:#E8ECF0;--panel:#F6F8F9;--ink:#17212B;--steel:#55636F;--rule:#C3CCD5;--pine:#2D5D4C;--red:#A3322A;
+  --display:"Bahnschrift","DIN Alternate","Roboto Condensed","Arial Narrow",sans-serif;--body:"Segoe UI",system-ui,Arial,sans-serif;--mono:"Cascadia Mono",Consolas,monospace}
+*{box-sizing:border-box}
+html{background:var(--paper)}
+body{margin:0;font:15px/1.5 var(--body);color:var(--ink);font-variant-numeric:tabular-nums}
+header{padding:18px 28px;border-bottom:1px solid var(--rule);background:var(--panel)}
+h1{font:600 26px/1 var(--display);margin:0 0 4px;letter-spacing:.02em}
+header p{margin:0;color:var(--steel);font-size:14px;max-width:80ch}
+main{padding:22px 28px;display:grid;gap:22px}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:18px 20px}
+h2{font:600 19px var(--display);margin:0 0 10px;letter-spacing:.02em}
+.muted{color:var(--steel);font-size:13.5px}
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{color:var(--steel);font-weight:600;font-size:13px}
+.mono{font-family:var(--mono);font-size:12.5px}
+.ev{color:var(--steel);font-size:13px;margin:8px 0 0;padding-left:18px}
+.err{color:var(--red)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Castlekeep watchtower</h1>
+  <p>It watches the chains for wallets while they are closed. It holds no keys to anyone's coins: only
+  transactions each wallet signed in advance, which can only pay that wallet, and on the EVM chains each
+  wallet's newest state signed by both sides. Test networks only.</p>
+</header>
+<main>
+  <section class="panel"><h2>Status</h2><p id="status" class="muted">Loading…</p><p class="err" id="err"></p></section>
+  <div id="wallets"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const names = {btc: "Bitcoin", ltc: "Litecoin", eth: "Ethereum", pol: "Polygon", base: "Base", bnb: "BNB Chain", avax: "Avalanche"};
+async function load() {
+  try {
+    const r = await fetch("/v1/tower/view", {method: "POST", body: "{}"});
+    const v = await r.json();
+    if (!r.ok) throw new Error(v.Error || r.statusText);
+    $("err").textContent = "";
+    const ago = v.LastCheck ? Math.max(0, Math.round(Date.now() / 1000 - v.LastCheck)) + " s ago" : "not yet";
+    $("status").innerHTML = `Watching: <b>${esc((v.Chains || []).map(c => names[c] || c).join(", ") || "no chains")}</b>. Last look at the chains: ${ago}.`
+      + (v.FeeAddr ? `<br>Its fee address on the EVM chains (its own test coins, only for gas): <span class="mono">${esc(v.FeeAddr)}</span>` : "");
+    const ws = v.Wallets || [];
+    $("wallets").innerHTML = ws.length ? ws.map(w => `<section class="panel"><h2>Wallet ${esc(w.Name || "(no name)")}</h2>
+      <p class="muted">Account <span class="mono">${esc(w.Account)}</span></p>
+      <table><thead><tr><th>Chain</th><th>Vault</th><th>What it holds</th></tr></thead><tbody>
+      ${(w.Vaults || []).map(x => `<tr><td>${esc(names[x.Chain] || x.Chain)}</td><td class="mono">${esc(x.ID)}</td><td>${esc(x.Status)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">No vaults yet.</td></tr>`}
+      </tbody></table>
+      <ul class="ev">${(w.Events || []).slice(-12).reverse().map(e => `<li>${esc(e)}</li>`).join("")}</ul></section>`).join("")
+      : `<section class="panel"><p class="muted">No wallet uses this watchtower yet. Start one with <span class="mono">go run . wallet -name alice -watchtower ${esc(location.origin)}</span>.</p></section>`;
+  } catch (e) {
+    $("err").textContent = "Can't reach the watchtower: " + e.message;
+  }
+}
+load();
+setInterval(load, 3000);
+</script>
+</body>
+</html>

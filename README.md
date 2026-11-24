@@ -147,6 +147,7 @@ This is a proof of concept, not a product.
 - [x] Run on signet, Bitcoin's public test network (separate programs, Bitcoin only)
 - [x] MuSig2 key-path settlements and splices on Bitcoin and Litecoin (new vaults; cheaper and more private)
 - [x] Fee bumping (child pays for parent, anchor outputs on the exit request; separate programs)
+- [x] A separate watchtower program that protects you while your wallet is closed (no keys to your coins)
 - [ ] Real fee estimation (btcd usually has no estimate; a minimum rate is used)
 - [ ] Lightning-channel version for near-instant deposits and withdrawals
 
