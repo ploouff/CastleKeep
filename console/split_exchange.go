@@ -291,7 +291,7 @@ func (x *Exchange) order(r OrderReq) (StateOffer, error) {
 		}
 	case "buy":
 		if r.Sats > l.ExchSats {
-			return StateOffer{}, userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", fmtCoin(l.ExchSats, xc.cfg.Info.Ticker))
+			return StateOffer{}, userErr("The exchange's side of the vault holds %s, so that's the most you can buy. Ask for more buying capacity to buy more.", fmtCoin(l.ExchSats, xc.cfg.Info.Ticker))
 		}
 		if cost > x.cash[v.account] {
 			return StateOffer{}, userErr("That costs %s and you have %s in cash.", fmtUSD(cost), fmtUSD(x.cash[v.account]))

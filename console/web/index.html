@@ -56,6 +56,7 @@ main{display:grid;grid-template-columns:minmax(250px,290px) minmax(0,1fr) minmax
 label{display:block;font-size:13.5px;color:var(--steel);margin-bottom:5px}
 .field{display:flex;gap:8px}
 .field input{flex:1;min-width:0;width:100%;border:1px solid var(--rule);border-radius:6px;padding:7px 10px;background:#fff}
+.field input.over{border-color:#b4442c;box-shadow:0 0 0 1px #b4442c}
 .hint{font-size:13px;color:var(--steel);margin:6px 0 0}
 
 /* vault */
@@ -510,14 +511,48 @@ function renderAccount() {
   if (S && S.ready && !busy) renderSwap();
 }
 
-// capInput stops an amount box at the most you can use (arrows and typing).
+// capInput stops an amount box at the most you can use. While you're typing
+// in it, the number is left alone (the box is only marked if it's too much);
+// it's brought down to the most you can use when you leave the box.
 function capInput(id, sats) {
   const el = $(id);
   if (!el) return;
-  if (sats == null) { el.removeAttribute("max"); return; } // nothing to go by (no vault yet)
+  if (!el.dataset.capped) {
+    el.dataset.capped = "1";
+    el.addEventListener("blur", () => {
+      const m = parseFloat(el.max);
+      if (el.max !== "" && (parseFloat(el.value) || 0) > m) el.value = String(m);
+      el.classList.remove("over");
+      el.dispatchEvent(new Event("input"));
+    });
+  }
+  if (sats == null) { el.removeAttribute("max"); el.classList.remove("over"); return; } // nothing to go by (no vault yet)
   const max = Math.max(0, Math.floor(sats)) / 1e8;
   el.max = String(max);
-  if ((parseFloat(el.value) || 0) > max) el.value = String(max);
+  const over = (parseFloat(el.value) || 0) > max;
+  if (document.activeElement === el) { el.classList.toggle("over", over); el.title = over ? `The most you can use is ${max}` : ""; return; }
+  el.classList.remove("over"); el.title = "";
+  if (over) el.value = String(max);
+}
+
+// keepTyping redraws a panel without losing what you're typing in it: the
+// panel is only rebuilt when its content changed, and the values, focus and
+// cursor of its boxes are carried over.
+function keepTyping(el, html) {
+  if (el.dataset.h === html) return false;
+  const kept = [...el.querySelectorAll("input[id]")].map(i => {
+    let sel = null;
+    try { sel = [i.selectionStart, i.selectionEnd]; } catch (e) {}
+    return {id: i.id, value: i.value, focus: document.activeElement === i, sel};
+  });
+  el.innerHTML = html; el.dataset.h = html;
+  for (const k of kept) {
+    const i = el.querySelector("#" + k.id);
+    if (!i) continue;
+    i.value = k.value;
+    if (k.focus) { i.focus(); try { if (k.sel && k.sel[0] != null) i.setSelectionRange(k.sel[0], k.sel[1]); } catch (e) {} }
+  }
+  return true;
 }
 // The most you can buy: what the exchange's side holds, and what your cash pays for.
 const buyable = (exchSats, cashCents) => Math.min(exchSats, S.price > 0 ? Math.max(0, cashCents) / 100 / S.price * 1e8 : 0);
@@ -584,11 +619,11 @@ function clockWords(v) {
 function renderVault() {
   const el = $("vaultPanel"), v = S.vault, c = S.chain;
   if (!v) {
-    el.innerHTML = `<h2 id="v-h" style="font:600 22px var(--display);margin:0">${coinIcon(c.id, 22)} ${esc(c.name)} vault</h2>
+    keepTyping(el, `<h2 id="v-h" style="font:600 22px var(--display);margin:0">${coinIcon(c.id, 22)} ${esc(c.name)} vault</h2>
       <div class="empty">
         <svg width="56" height="56" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><path d="M12 8.5v-1M12 16.5v-1M8.5 12h-1M16.5 12h-1" stroke="var(--pine)" stroke-width="1.5"/></svg>
         <p>No vault open yet. Lock ${esc(c.ticker)} from your wallet to open one, then ${c.signet ? "wait for the next block (about 10 minutes)" : "mine a block"} to confirm the deposit.</p>
-      </div>`;
+      </div>`);
     return;
   }
   const [cls, label] = statusInfo(v);
@@ -635,7 +670,7 @@ function renderVault() {
   if (v.sweepKind === "user") sweepNote = `You collected your share of state #${v.publishedState} after the ${v.penaltyDelay}-block wait.`;
   const scripts = (v.scripts || []).map(x => `<p class="small muted" style="margin:10px 0 4px">${esc(x.label)}</p><pre class="mono">${esc(x.text)}</pre>`).join("");
 
-  el.innerHTML = `
+  keepTyping(el, `
     <div class="vault-head">
       <div><h2 id="v-h" style="font:600 22px var(--display);margin:0">${coinIcon(c.id, 22)} ${esc(c.name)} vault</h2>
       <div class="small muted">Locked <span class="num">${coin(v.locked)}</span></div></div>
@@ -676,7 +711,7 @@ function renderVault() {
     <table class="states"><thead><tr><th>#</th><th>What happened</th><th class="r">Yours</th><th class="r">${exchLabel}</th>${rev ? "<th>Revocation</th>" : ""}</tr></thead><tbody>${rows}</tbody></table>${revNote}
     <details style="margin-top:14px"><summary>${c.evm ? "Show the contract's rules" : "Show the vault's scripts"}</summary>
       <p class="small muted" style="margin:10px 0 4px">${c.evm ? "Contract and vault" : "Vault address"}</p><pre class="mono">${esc(v.address)}</pre>${scripts}
-    </details>`;
+    </details>`);
   const capBtn = $("capBtn");
   if (capBtn) capBtn.onclick = () => act({action: "capacity", sats: Math.round((parseFloat($("capAmt").value) || 0) * 1e8)});
   $("settle").onclick = () => act({action: "settle"});
@@ -688,21 +723,21 @@ function renderVault() {
 function capacityBlock(v, c) {
   if (!c.dualFund) return "";
   const eth = c.evm;
-  if (v.fundPending) {
-    return `<p class="hint" style="margin-top:10px">The exchange's deposit is waiting for a block. Mine one to add the buying capacity.</p>`;
-  }
   const info = v.exchDeposit > 0
-    ? `<p class="hint" style="margin-top:10px">You put in <b>${coin(v.userDeposit)}</b> and the exchange locked <b>${coin(v.exchDeposit)}</b> of buying capacity. You can buy up to <b>${coin(v.exchSats)}</b> more.</p>` : "";
-  // Ethereum's contract takes one deposit per vault; Bitcoin and Litecoin can add more with another splice.
-  if (v.status !== "open" || (eth && v.exchDeposit > 0)) return info;
+    ? `<p class="hint" style="margin-top:10px">You put in <b>${coin(v.userDeposit)}</b> and the exchange has locked <b>${coin(v.exchDeposit)}</b> of buying capacity so far. You can buy up to <b>${coin(v.exchSats)}</b> more.</p>` : "";
+  if (v.status !== "open") return info;
+  // The box stays while the vault is open, so you can ask again (to fix a
+  // too-small amount, or to buy more). Only one request waits for a block at a time.
   const how = eth
-    ? `Ask the exchange to lock its own ${esc(c.ticker)} in your vault so you can buy from it.`
-    : `Ask the exchange to add its own ${esc(c.ticker)} to your vault so you can buy from it. You both sign one transaction that moves the vault and the exchange's coins into a bigger vault.`;
+    ? `Ask the exchange to lock its own ${esc(c.ticker)} in your vault so you can buy from it. You can ask again later for more.`
+    : `Ask the exchange to add its own ${esc(c.ticker)} to your vault so you can buy from it. You both sign one transaction that moves the vault and the exchange's coins into a bigger vault. You can ask again later for more.`;
+  const wait = v.fundPending
+    ? `<p class="hint" style="margin:8px 0 0;color:var(--ink)">The exchange's last deposit is waiting for a block. ${c.signet ? "Once the next block comes" : "Mine one, and once it's in"}, the capacity is added and you can ask for more.</p>` : "";
   return info + `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:#fff">
-      <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 ? "Add more buying capacity" : "Buy more than you sell"}</label>
-      <p class="hint" style="margin:0 0 8px">${how} Fee: 0.2% of the amount, taken from your share.</p>
+      <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 || v.fundPending ? "Add more buying capacity" : "Buy more than you sell"}</label>
+      <p class="hint" style="margin:0 0 8px">${how} Up to 5 ${esc(c.ticker)} per request. Fee: 0.2% of the amount, taken from your share.</p>
       <div class="field"><input id="capAmt" type="number" min="0.001" max="5" step="0.5" value="${esc(c.defaultLock)}" inputmode="decimal" aria-label="Buying capacity in ${esc(c.ticker)}">
-      <button class="btn" id="capBtn">Ask the exchange to lock ${esc(c.ticker)}</button></div>
+      <button class="btn" id="capBtn" ${v.fundPending ? "disabled" : ""}>Ask the exchange to lock ${esc(c.ticker)}</button></div>${wait}
     </div>`;
 }
 

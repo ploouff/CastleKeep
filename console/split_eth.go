@@ -263,7 +263,7 @@ func (x *Exchange) ethOrder(r EthOrderReq) (EthStateOffer, error) {
 		}
 	case "buy":
 		if r.Sats > l.ExchSats {
-			return EthStateOffer{}, userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", fmtCoin(l.ExchSats, xe.ticker))
+			return EthStateOffer{}, userErr("The exchange's side of the vault holds %s, so that's the most you can buy. Ask for more buying capacity to buy more.", fmtCoin(l.ExchSats, xe.ticker))
 		}
 		if cost > x.cash[v.account] {
 			return EthStateOffer{}, userErr("That costs %s and you have %s in cash.", fmtUSD(cost), fmtUSD(x.cash[v.account]))
@@ -643,6 +643,9 @@ func (w *Wallet) EthCapacity(chain string, sats int64) error {
 	we, v, err := w.ethVault(chain)
 	if err != nil {
 		return err
+	}
+	if v.capPending {
+		return userErr("The exchange's last deposit is still waiting for a block. Once it's in, you can ask for more.")
 	}
 	if err := call(w.base, "/v1/eth/capacity", EthCapacityReq{v.id.String(), sats, we.id}, nil); err != nil {
 		return err

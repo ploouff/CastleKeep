@@ -704,8 +704,8 @@ func (e *EthEngine) addCapacity(sats int64) error {
 	if e.mode == "offline" {
 		return userErr("The exchange is offline and can't lock anything.")
 	}
-	if v.exchDeposit > 0 || (v.fundTx != "" && e.receipt(v.fundTx) == 0) {
-		return userErr("The exchange has already locked buying capacity in this vault.")
+	if v.fundTx != "" && !v.fundDone && e.receipt(v.fundTx) == 0 {
+		return userErr("The exchange's last deposit is still waiting for a block. Mine one, then ask for more.")
 	}
 	if sats < 100_000 || sats > 5*unit {
 		return userErr("Ask for between 0.001 and 5 %s.", e.cfg.Info.Ticker)
@@ -714,8 +714,8 @@ func (e *EthEngine) addCapacity(sats int64) error {
 	if fee > v.latest().UserSats {
 		return userErr("The fee (%s) is more than your share of the vault.", e.fmt(fee))
 	}
-	info := &TxInfo{Label: "Exchange locks " + e.fmt(sats) + " of buying capacity", Path: "fund(id): payable, exchange only, once per vault",
-		Script:  "fund(id)\nrequire(msg.sender == exchange)\nrequire(no exit in progress)\nrequire(no capacity added yet)\namount += msg.value",
+	info := &TxInfo{Label: "Exchange locks " + e.fmt(sats) + " of buying capacity", Path: "fund(id): payable, exchange only, can be repeated",
+		Script:  "fund(id)\nrequire(msg.sender == exchange)\nrequire(no exit in progress)\nexchangeDeposit += msg.value\namount += msg.value",
 		Inputs:  []IO{{Label: "Exchange wallet", Sats: sats, Ref: e.exchAddr}},
 		Outputs: []IO{{Label: "Vault #" + v.id.String() + " (exchange's side)", Sats: sats, Ref: e.contract}}}
 	hash, err := e.send(e.exchAddr, toWei(sats), calldata("fund(uint256)", wordInt(v.id)), info,
@@ -738,7 +738,7 @@ func (e *EthEngine) applyFunding() {
 	switch e.receipt(v.fundTx) {
 	case 1:
 		v.fundDone = true
-		v.exchDeposit = v.fundAmt
+		v.exchDeposit += v.fundAmt
 		v.amount += v.fundAmt
 		fee := capacityFee(v.fundAmt)
 		l := v.latest()
@@ -822,7 +822,7 @@ func (e *EthEngine) canTrade(side string, sats int64) error {
 			if v.exchDeposit == 0 {
 				return userErr("You can only buy back %s sold from this vault (%s). Ask the exchange to lock buying capacity to buy more.", e.cfg.Info.Ticker, e.fmt(l.ExchSats))
 			}
-			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", e.fmt(l.ExchSats))
+			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy. Ask for more buying capacity to buy more.", e.fmt(l.ExchSats))
 		}
 	default:
 		return userErr("Unknown order side.")

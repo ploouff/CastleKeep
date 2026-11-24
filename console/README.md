@@ -52,7 +52,7 @@ capacity"), for a 0.2% fee taken from your share. You can then buy up to that am
 your cash, or with a swap from another coin, and the coins you buy are in the vault from
 the start.
 
-- **Ethereum and the other EVM chains:** the exchange sends coins to the contract (`fund`), once per vault.
+- **Ethereum and the other EVM chains:** the exchange sends coins to the contract (`fund`), as often as needed.
 - **Bitcoin and Litecoin:** you and the exchange both sign one transaction (a "splice")
   that spends the vault plus some of the exchange's coins into a bigger vault with the same
   scripts. The exit request and the pay-back are signed again, so the old ones (and every
@@ -355,8 +355,10 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
   and your watchtower publishes your latest state if it pays you more.
 - **Revocation on Bitcoin and Litecoin only works if someone is watching.** Your watchtower
   must sweep an old state within 6 blocks (BTC) or 24 blocks (LTC). Ethereum uses state numbers.
-- **On Ethereum the exchange can lock buying capacity once per vault.** The contract allows
-  one deposit; Bitcoin and Litecoin allow more with further splices.
+- **Buying capacity waits for a block each time.** You can ask for more as often as you like
+  (up to 5 coins per request), but only one request waits for a block at a time. On signet
+  that is about 10 minutes per request. Kept EVM chains made before this change still run the
+  old contract, which takes one deposit per vault; start the chains with `-fresh` to get the new one.
 - **The cash side is custodial**, as on any exchange. One cash balance is shared by all coins.
 - **Swaps are two signed states, not one transaction.** They are only as safe as the two
   vaults they touch, and there is no hash-locked atomic swap.

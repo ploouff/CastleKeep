@@ -734,7 +734,7 @@ func (e *UTXOEngine) canTrade(side string, sats int64) error {
 			if v.exchDeposit == 0 {
 				return userErr("You can only buy back %s sold from this vault (%s). Ask the exchange to lock buying capacity to buy more.", t, e.fmt(l.ExchSats))
 			}
-			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", e.fmt(l.ExchSats))
+			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy. Ask for more buying capacity to buy more.", e.fmt(l.ExchSats))
 		}
 	default:
 		return userErr("Unknown order side.")

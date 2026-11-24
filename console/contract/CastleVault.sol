@@ -59,15 +59,15 @@ contract CastleVault {
         emit Opened(id, msg.sender, exchange, msg.value, exitDelay);
     }
 
-    /// The exchange locks its own ETH so the user can buy from it. Once per vault.
+    /// The exchange locks its own ETH so the user can buy from it. It can add
+    /// more later (each deposit adds to the exchange's side).
     function fund(uint256 id) external payable {
         Vault storage v = vaults[id];
         require(msg.sender == v.exchange, "only the exchange can add buying capacity");
         require(msg.value > 0, "nothing locked");
         require(!v.closed, "vault is closed");
         require(v.exitStart == 0, "an exit is in progress");
-        require(v.exchangeDeposit == 0, "buying capacity was already added");
-        v.exchangeDeposit = msg.value;
+        v.exchangeDeposit += msg.value;
         v.amount += msg.value;
         emit Funded(id, msg.value);
     }
