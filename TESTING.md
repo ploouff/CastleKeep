@@ -178,6 +178,26 @@ coloured badges drawn by the page.
 
 Base's coin is ETH too; the swap list calls it "ETH on Base" to tell it apart from Ethereum.
 
+## H. Public EVM test networks (Sepolia, Amoy, Base Sepolia, BNB Chain testnet, Fuji)
+
+The automatic tests `TestPublicEVMNetwork` and `TestPublicEVMRestart` run this on a Hardhat
+node that behaves like a public network (it mines by itself and can't send for anyone), and
+`TestPublicChainCheck` checks that a main network is refused. By hand:
+
+1. First window: `go run . chains -network testnets -exit-window 1h`. To start with just
+   Sepolia and skip the signet download: `-coins eth`. Each network prints "connected".
+2. Second window: `go run . exchange`. It prints the exchange's address on each network.
+3. Third window: `go run . wallet -name alice`. It prints your addresses; they are also on
+   the page under **Your wallet**.
+4. From a faucet for that network, send test coins to the **exchange's** address. Within
+   about half a minute the exchange window says it put the CastleVault contract on the
+   network, and the chains window shows its address.
+5. Send test coins to **your** address and press **Check for coins sent to your address**.
+6. Lock `0.01` and wait a few seconds: the vault opens. Sell `0.005`, then settle.
+7. Exit test: lock again, set the exchange to **Offline**, **Request exit**, wait the hour,
+   then press **Pay out after the window**.
+8. The link under your address opens your transactions on the network's block explorer.
+
 ## What a failure looks like
 
 - Automatic tests: a `--- FAIL` line with the expected and actual values.

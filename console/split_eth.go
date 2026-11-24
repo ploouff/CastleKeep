@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 )
@@ -79,6 +80,13 @@ type xEth struct {
 	delay      int64
 	price      int64
 	mode       string
+
+	// public test networks (evm_public.go)
+	announce  func(addr string) error // tells the chains program where the contract is
+	announced bool
+	deployTx  string
+	lastTry   time.Time
+	setupNote string
 }
 
 type xEthVault struct {
@@ -407,6 +415,7 @@ func (x *Exchange) ethTick() {
 }
 
 func (x *Exchange) evmTick(xe *xEth) {
+	x.evmSetup(xe)
 	now := xe.c.chainTime()
 	for _, v := range xe.vaults {
 		if v.closed || len(v.states) == 0 {
@@ -455,6 +464,12 @@ type wEth struct {
 	delay      int64
 	exchAddr   string
 	vault      *wEthVault
+
+	// public test networks (evm_public.go)
+	lookup    func() string // asks the chains program for the contract address
+	checked   bool          // the contract's code is this version's CastleVault
+	lastLook  time.Time
+	setupNote string
 }
 
 type wEthVault struct {
@@ -537,6 +552,13 @@ func (w *Wallet) EthOpen(chain string, sats int64) error {
 	}
 	if we.vault != nil && we.vault.closed == "" {
 		return userErr("You already have an open vault.")
+	}
+	if we.c.public && !we.checked {
+		we.lastLook = time.Time{}
+		w.evmSetup(we)
+		if !we.checked {
+			return userErr("Not ready to lock yet: %s", we.setupNote)
+		}
 	}
 	var info EthInfoResp
 	if err := call(w.base, "/v1/eth/info", EthChainReq{we.id}, &info); err != nil {
@@ -743,6 +765,7 @@ func (w *Wallet) ethTick() {
 }
 
 func (w *Wallet) evmTick(we *wEth) {
+	w.evmSetup(we)
 	if we.vault == nil {
 		return
 	}
@@ -799,4 +822,14 @@ func (w *Wallet) EthBalance(chain string) int64 {
 		return 0
 	}
 	return fromWei(we.c.balance(we.addr))
+}
+
+// EthAddress is the wallet's address on an EVM chain (where to send it coins).
+func (w *Wallet) EthAddress(chain string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if we := w.evm[evmID(chain)]; we != nil {
+		return we.addr
+	}
+	return ""
 }

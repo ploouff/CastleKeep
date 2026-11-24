@@ -294,6 +294,51 @@ go run . wallet -name alice
   close them.
 - Anything you send on signet is public, like on the real network.
 
+### Public EVM test networks (Sepolia, Amoy, Base Sepolia, BNB Chain testnet, Fuji)
+
+```
+go run . chains -network testnets -exit-window 1h
+go run . exchange
+go run . wallet -name alice
+```
+
+`-network testnets` is Bitcoin signet (as above) plus the public test networks of the five
+EVM chains. Their coins have no value and come from public faucets.
+
+| Coin | Public test network | Chain ID | Free public node used |
+| --- | --- | --- | --- |
+| Ethereum | Sepolia | 11155111 | ethereum-sepolia-rpc.publicnode.com |
+| Polygon | Amoy | 80002 | polygon-amoy-bor-rpc.publicnode.com |
+| Base | Base Sepolia | 84532 | sepolia.base.org |
+| BNB Chain | BNB Chain testnet | 97 | bsc-testnet-rpc.publicnode.com |
+| Avalanche | Fuji | 43113 | api.avax-test.network |
+
+- **Safety check:** before using a node, the chains program asks it which chain it is on.
+  A main network (real coins) is always refused, and so is any chain that isn't the
+  expected test network. That chain is then left out.
+- **Choosing networks:** `-coins eth,pol` uses only those, and leaving out `btc` skips signet
+  (no signet download). `-rpc eth=https://...,pol=https://...` uses other nodes, for
+  example your own from a node provider.
+- **Exit window:** `-exit-window` sets it for new EVM vaults, from `1m` to `24h` (default
+  `24h`). With `1h` you can try "the exchange disappears" in an afternoon. Bitcoin's exit
+  window is counted in blocks and stays 144 (about a day on signet).
+- **Coins:** there's no Mine button and no faucet button. Each wallet page shows **your
+  address** on that network, with a link to the network's block explorer; send it test coins
+  from a faucet. The exchange's addresses are on its admin page and in its window.
+- **The contract:** the exchange puts the CastleVault contract on each network by itself once
+  its address there has test coins, and tells the chains program the address (kept in
+  `castlekeep-data\chains-signet\evm-public-<coin>.json`). Your wallet only uses a contract
+  whose code is exactly the CastleVault code built into the program, and refuses to lock
+  until then.
+- **Each program signs its own transactions** (EIP-1559). Nobody else can send for them.
+- **How much to send** (rough, fees change): the exchange needs enough to put the contract
+  up plus what it will lock for buyers. Sepolia, Base Sepolia, BNB Chain testnet and Fuji
+  fees are tiny now; Amoy's are higher, so send the exchange about 0.5 POL there. The page
+  starts with 0.01 to lock and 0.005 to trade.
+- Reads from the public nodes are kept for 4 seconds, so the pages and watchtowers don't
+  flood them. A node that is busy or down only slows things down; the watchtowers try again.
+- Everything you do on these networks is public.
+
 ## The screen
 
 | Area | What it does |
@@ -357,8 +402,11 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
   must sweep an old state within 6 blocks (BTC) or 24 blocks (LTC). Ethereum uses state numbers.
 - **Buying capacity waits for a block each time.** You can ask for more as often as you like
   (up to 5 coins per request), but only one request waits for a block at a time. On signet
-  that is about 10 minutes per request. Kept EVM chains made before this change still run the
-  old contract, which takes one deposit per vault; start the chains with `-fresh` to get the new one.
+  that is about 10 minutes per request.
+- **Changing the contract leaves old EVM vaults behind.** When the contract's code changes, the
+  chains program puts the new code on its kept local chains at the next start, and the
+  exchange and wallets drop vaults saved on the old contract (test coins only). Settle EVM
+  vaults before updating. On the public test networks the exchange puts the new code up itself.
 - **The cash side is custodial**, as on any exchange. One cash balance is shared by all coins.
 - **Swaps are two signed states, not one transaction.** They are only as safe as the two
   vaults they touch, and there is no hash-locked atomic swap.

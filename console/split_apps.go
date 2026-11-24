@@ -76,14 +76,33 @@ func runChains(args []string) {
 	ethRPC := fs.String("eth-rpc", "", "use this Ethereum node (e.g. Hardhat at http://127.0.0.1:8545) instead of starting one")
 	hardhat := fs.String("hardhat", defaultHardhatDir(), "folder with Hardhat installed, used to start the EVM test chains")
 	data := fs.String("data", "", "folder that keeps the test chains between runs (default: castlekeep-data/chains, or chains-signet)")
-	network := fs.String("network", "regtest", "regtest (private test chains) or signet (Bitcoin's public test network, Bitcoin only)")
+	network := fs.String("network", "regtest", "regtest (private test chains), signet (Bitcoin's public test network, Bitcoin only) or testnets (signet plus the public EVM test networks)")
 	fresh := fs.Bool("fresh", false, "start new test chains (the old folder is renamed, not deleted)")
+	exitWindow := fs.String("exit-window", "24h", "EVM chains: how long the exit window lasts for new vaults, between 1m and 24h (e.g. 1h to try an exit in an afternoon)")
+	coins := fs.String("coins", "btc,eth,pol,base,bnb,avax", "testnets: which networks to use (btc = signet, eth = Sepolia, pol = Amoy, base = Base Sepolia, bnb = BNB testnet, avax = Fuji)")
+	rpcs := fs.String("rpc", "", "testnets: other public nodes to use, e.g. eth=https://...,pol=https://...")
 	fs.Parse(args)
 
-	signet := *network == "signet"
+	testnets := *network == "testnets"
+	signet := *network == "signet" || testnets
 	if !signet && *network != "regtest" {
-		fmt.Println("-network must be regtest or signet.")
+		fmt.Println("-network must be regtest, signet or testnets.")
 		os.Exit(1)
+	}
+	delay, err := parseExitWindow(*exitWindow)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	use := map[string]bool{}
+	for _, c := range strings.Split(*coins, ",") {
+		use[strings.TrimSpace(c)] = true
+	}
+	nodeURL := map[string]string{}
+	for _, kv := range strings.Split(*rpcs, ",") {
+		if id, u, ok := strings.Cut(strings.TrimSpace(kv), "="); ok {
+			nodeURL[id] = u
+		}
 	}
 	if *data == "" {
 		*data = filepath.Join(DataDir(), map[bool]string{false: "chains", true: "chains-signet"}[signet])
@@ -107,12 +126,28 @@ func runChains(args []string) {
 	keepChain(&lc, filepath.Join(*data, "ltc"), *port+2)
 	engines := map[string]*UTXOEngine{"btc": NewUTXOEngine(bc), "ltc": NewUTXOEngine(lc)}
 	if signet {
-		// Bitcoin only: Litecoin has no signet, and Ethereum's public test
-		// networks aren't supported yet.
+		// Bitcoin on signet. Litecoin has no signet. With -network testnets
+		// the EVM chains use their public test networks (evm_public.go).
 		sc := signetConfig(*btcd)
 		sc.DataDir, sc.RPCPort = filepath.Join(*data, "btc"), *port+1
 		engines = map[string]*UTXOEngine{"btc": NewUTXOEngine(sc)}
+		if testnets && !use["btc"] {
+			engines = map[string]*UTXOEngine{}
+		}
 		*ethRPC = ""
+	}
+	publics := map[string]*publicEVM{}
+	if testnets {
+		for _, c := range evmChains {
+			if !use[c.ID] {
+				continue
+			}
+			url := c.RPC
+			if u := nodeURL[c.ID]; u != "" {
+				url = u
+			}
+			publics[c.ID] = startPublicEVM(c, url, delay, filepath.Join(*data, "evm-public-"+c.ID+".json"))
+		}
 	}
 	for _, e := range engines {
 		e.Start()
@@ -130,6 +165,7 @@ func runChains(args []string) {
 					continue
 				}
 				ec := evmConfig(c, "", "", *ethRPC)
+				ec.ExitDelay = delay
 				ethFile := filepath.Join(*data, "eth.json")
 				ec.Contract = keptContract(ethFile)
 				ee := NewEthEngine(ec)
@@ -151,6 +187,7 @@ func runChains(args []string) {
 				fmt.Printf("%s: %s\n", c.Name, k.Note)
 			}
 			ec := evmConfig(c, "", "", k.URL)
+			ec.ExitDelay = delay
 			cf := filepath.Join(*data, "evm-"+c.ID+".json")
 			ec.Contract = keptContract(cf)
 			k.Eng = NewEthEngine(ec)
@@ -193,10 +230,23 @@ func runChains(args []string) {
 			}
 			out = append(out, cs)
 		}
+		for _, p := range publics {
+			out = append(out, p.status())
+		}
 		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 		return out, nil
 	}))
+	m.Handle("/contract", handle(func(r ContractReq) (empty, error) {
+		p, ok := publics[r.Chain]
+		if !ok {
+			return empty{}, userErr("%s isn't a public test network here.", r.Chain)
+		}
+		return empty{}, p.register(r.Address)
+	}))
 	m.Handle("/faucet", handle(func(r FaucetReq) (FaucetResp, error) {
+		if p, ok := publics[r.Chain]; ok {
+			return FaucetResp{}, userErr("%s is a public test network: get coins from a %s faucet instead.", p.c.Network, p.c.Network)
+		}
 		if ee, ok := evms[r.Chain]; ok {
 			if r.Sats <= 0 || r.Sats > 25*unit {
 				return FaucetResp{}, userErr("Ask for up to 25 %s.", ee.Info().Ticker)
@@ -214,6 +264,9 @@ func runChains(args []string) {
 		return FaucetResp{op, r.Sats}, err
 	}))
 	m.Handle("/mine", handle(func(r MineReq) (empty, error) {
+		if p, ok := publics[r.Chain]; ok {
+			return empty{}, userErr("Blocks come by themselves on %s; there's nothing to mine.", p.c.Network)
+		}
 		if ee, ok := evms[r.Chain]; ok {
 			return empty{}, ee.MineEth(r.N, r.Secs)
 		}
@@ -227,13 +280,18 @@ func runChains(args []string) {
 	fmt.Println("Castlekeep test chains (test networks only)")
 	fmt.Println("Chains service:", url)
 	fmt.Println("Kept in:", *data, "(start with -fresh for new chains)")
-	if signet {
+	if testnets {
+		fmt.Println("Public test networks (coins with no value). Exit window for new EVM vaults:", durText(delay))
+	}
+	if signet && len(engines) > 0 {
 		fmt.Println("Bitcoin signet: the first start downloads the signet chain (a few GB; it can take hours).")
 		fmt.Println("When it says Ready, in another window:  go run . exchange")
+	} else if testnets {
+		fmt.Println("Next, in another window:  go run . exchange")
 	} else {
 		fmt.Println("The first start mines test blocks (about a minute). Next, in another window:  go run . exchange")
 	}
-	if signet {
+	if signet && engines["btc"] != nil {
 		go func() {
 			last := ""
 			for range time.Tick(30 * time.Second) {
@@ -301,6 +359,7 @@ type XChainView struct {
 	Address          string // signet: where to send coins to the exchange's wallet
 	Name, Color      string // for the admin page's coin icons
 	Badge            string
+	Note             string // public test networks: setting up the contract
 }
 type XStateResp struct {
 	Chains []XChainView
@@ -332,7 +391,7 @@ func (x *Exchange) state(empty) (XStateResp, error) {
 				bal += a
 			}
 		}
-		out.Chains = append(out.Chains, XChainView{id, xc.cfg.Info.Ticker, xc.mode, xc.price, bal, "", xc.cfg.Info.Name, xc.cfg.Info.Color, xc.cfg.Info.Badge})
+		out.Chains = append(out.Chains, XChainView{id, xc.cfg.Info.Ticker, xc.mode, xc.price, bal, "", xc.cfg.Info.Name, xc.cfg.Info.Color, xc.cfg.Info.Badge, ""})
 		if xc.cfg.Network == "signet" {
 			out.Chains[len(out.Chains)-1].Address = address(xc.pay, &xc.cfg.Params)
 		}
@@ -377,6 +436,9 @@ func runExchange(args []string) {
 	for _, c := range evmChains {
 		if ep := eps[c.ID]; ep != nil {
 			x.AttachEVM(c.ID, *ep, c.Price)
+			if ep.Public {
+				x.evm[c.ID].announce = announceContract(*chains, c.ID)
+			}
 		}
 	}
 	file := filepath.Join(*data, "exchange.json")
@@ -398,6 +460,12 @@ func runExchange(args []string) {
 		call(*chains, "/mine", MineReq{Chain: id, N: 1}, nil)
 	}
 	for id, xe := range x.evm {
+		if xe.c.public {
+			c, _ := evmByID(id)
+			fmt.Printf("%s: send test %s to the exchange's address %s (from a faucet for %s). It puts the contract on %s by itself once they arrive.\n",
+				c.netName(), c.Ticker, xe.addr, c.Network, c.Network)
+			continue
+		}
 		if loaded && fromWei(xe.c.balance(xe.addr)) >= unit {
 			continue // funded on an earlier run
 		}
@@ -459,6 +527,9 @@ func runWallet(args []string) {
 	for _, c := range evmChains {
 		if ep := eps[c.ID]; ep != nil {
 			w.AttachEVM(c.ID, *ep)
+			if ep.Public {
+				w.evm[c.ID].lookup = lookupContract(*chains, c.ID)
+			}
 		}
 	}
 	file := filepath.Join(*data, walletFile(*name))
@@ -490,8 +561,13 @@ func runWallet(args []string) {
 			continue
 		}
 		ee := &walletEthEngine{w: w, id: c.ID, info: evmConfig(c, "", "", "").Info, chains: *chains, exch: *exch}
+		if eps[c.ID].Public {
+			ee.info = publicInfo(c, eps[c.ID].ExitDelay)
+		}
 		ee.info.Model = "Separate programs: your wallet holds only your " + c.Name + " key and checks the exchange's signature on every state. " + ee.info.Model
-		if loaded && w.EthBalance(c.ID) >= unit {
+		if ee.info.Public {
+			fmt.Printf("%s: send test %s to your wallet at %s (from a faucet for %s).\n", ee.info.Name, c.Ticker, w.EthAddress(c.ID), c.Network)
+		} else if loaded && w.EthBalance(c.ID) >= unit {
 			// funded on an earlier run
 		} else if ee.Do(ActionReq{Action: "faucet"}) == nil {
 			ee.Do(ActionReq{Action: "faucet"})

@@ -85,7 +85,9 @@ type EthEngine struct {
 
 	node      *exec.Cmd
 	url       string
-	signLocal bool       // sign transactions here and send them raw (evm_sign.go)
+	signLocal bool // sign transactions here and send them raw (evm_sign.go)
+	public    bool // a public test network: reads are cached briefly (evm_public.go)
+	cache     rpcCache
 	signer    signerFunc // the keys this engine may sign with
 	client    string     // "anvil" or "hardhat"
 	chainID   *big.Int
@@ -221,12 +223,26 @@ func (e *EthEngine) call(method string, params ...any) (json.RawMessage, error) 
 	if params == nil {
 		params = []any{}
 	}
+	if e.public {
+		return e.cache.get(method, params, func() (json.RawMessage, error) { return e.rpc(method, params) })
+	}
+	return e.rpc(method, params)
+}
+
+// rpcClient gives up on a node that doesn't answer, so a stuck public node
+// can't hold a program's lock forever.
+var rpcClient = &http.Client{Timeout: 30 * time.Second}
+
+func (e *EthEngine) rpc(method string, params []any) (json.RawMessage, error) {
 	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-	resp, err := http.Post(e.url, "application/json", bytes.NewReader(body))
+	resp, err := rpcClient.Post(e.url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, errors.New("the node is busy (too many requests); it will be tried again shortly")
+	}
 	var out struct {
 		Result json.RawMessage `json:"result"`
 		Error  *rpcErr         `json:"error"`
@@ -366,6 +382,9 @@ func (e *EthEngine) receipt(hash string) int {
 	if t := e.txs[hash]; t != nil && t.Status == "confirmed" {
 		return 1
 	}
+	if r, ok := e.cache.final(hash); ok {
+		return r
+	}
 	r, err := e.call("eth_getTransactionReceipt", hash)
 	if err != nil || string(r) == "null" {
 		return 0
@@ -380,6 +399,7 @@ func (e *EthEngine) receipt(hash string) int {
 		if t != nil {
 			t.Status, t.Height = "confirmed", hexBig(rc.BlockNumber).Int64()
 		}
+		e.cache.setFinal(e.public, hash, 1)
 		return 1
 	}
 	if t != nil && t.Status != "rejected" {
@@ -387,6 +407,7 @@ func (e *EthEngine) receipt(hash string) int {
 		t.Error = "Reverted when it was mined: another transaction changed the vault first."
 		e.log("bad", t.Label+" failed when mined", t.Error, hash)
 	}
+	e.cache.setFinal(e.public, hash, -1)
 	return -1
 }
 
@@ -1133,6 +1154,7 @@ type EthEndpoint struct {
 	ChainID               string // decimal
 	ExitDelay             int64
 	SignLocally           bool // each program signs its own transactions (public networks; evm_sign.go)
+	Public                bool // a public test network (evm_public.go): no mining, no faucet
 }
 
 func (e *EthEngine) Endpoint() EthEndpoint {
@@ -1142,7 +1164,7 @@ func (e *EthEngine) Endpoint() EthEndpoint {
 	if e.chainID != nil {
 		id = e.chainID.String()
 	}
-	return EthEndpoint{URL: e.url, Contract: e.contract, Client: e.client, ChainID: id, ExitDelay: e.cfg.ExitDelay}
+	return EthEndpoint{URL: e.url, Contract: e.contract, Client: e.client, ChainID: id, ExitDelay: e.cfg.ExitDelay, SignLocally: e.signLocal, Public: e.public}
 }
 
 // newEthLight is a bare EthEngine used only for its RPC, contract and
@@ -1150,7 +1172,7 @@ func (e *EthEngine) Endpoint() EthEndpoint {
 func newEthLight(ep EthEndpoint) *EthEngine {
 	id, _ := new(big.Int).SetString(ep.ChainID, 10)
 	return &EthEngine{url: ep.URL, contract: ep.Contract, client: ep.Client, chainID: id,
-		cfg: EthConfig{ExitDelay: ep.ExitDelay}, txs: map[string]*TxInfo{}, ready: true, signLocal: ep.SignLocally}
+		cfg: EthConfig{ExitDelay: ep.ExitDelay}, txs: map[string]*TxInfo{}, ready: true, signLocal: ep.SignLocally || ep.Public, public: ep.Public}
 }
 
 // FundAddress adds test ETH to an address and lets the node send from it.
