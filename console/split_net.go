@@ -112,6 +112,7 @@ type OpenKeysResp struct {
 	ExchPub, ExchPay []byte
 	Delay, D2        int64
 	Anchors          bool // the exit request has a small output for each side, to speed it up (fees.go)
+	MuSig2           bool // the vault output has both keys combined (MuSig2), so settling looks like a normal payment (musig.go)
 }
 type OpenStartReq struct {
 	VaultID string
@@ -153,16 +154,26 @@ type CommitResp struct {
 	CashCents   int64
 }
 
-type SettleReq struct{ VaultID string }
-type SettleResp struct{ ExchSig []byte }
+// Settling. On a MuSig2 vault (musig.go) the wallet sends a fresh public nonce
+// and the exchange answers with its own and its partial signature; older
+// vaults use the exchange's script-path signature (ExchSig).
+type SettleReq struct {
+	VaultID   string
+	UserNonce []byte `json:",omitempty"`
+}
+type SettleResp struct {
+	ExchSig                []byte
+	ExchNonce, ExchPartial []byte `json:",omitempty"`
+}
 
 // Adding exchange coins (a splice). The old state's secrets are only swapped
 // once the splice has confirmed (CapacityFinish): until then the old vault
 // output could still be the one that ends up on the chain.
 type CapacityReq struct {
-	VaultID string
-	Sats    int64
-	UHash   []byte
+	VaultID   string
+	Sats      int64
+	UHash     []byte
+	UserNonce []byte `json:",omitempty"` // MuSig2 vaults: for the splice's key-path signature
 }
 type CapacityOffer struct {
 	SpliceTx                             string // exchange's wallet inputs already signed
@@ -170,10 +181,12 @@ type CapacityOffer struct {
 	SpliceSig, ExitSig, RefundSig, RHash []byte
 	ExchSigU                             []byte
 	State                                StateOffer
+	SpliceNonce, SplicePartial           []byte `json:",omitempty"` // MuSig2 vaults, instead of SpliceSig
 }
 type CapacityCommitReq struct {
 	VaultID                                 string
 	SpliceSig, ExitSig, RefundSig, UserSigE []byte
+	SplicePartial                           []byte `json:",omitempty"` // MuSig2 vaults, instead of SpliceSig
 }
 type CapacityFinishReq struct {
 	VaultID     string

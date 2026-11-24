@@ -23,6 +23,26 @@ node, or the CastleVault smart contract on an EVM test node) decides whether eac
 | **Ethereum** | `CastleVault` smart contract (`contract/CastleVault.sol`). Both sides sign every state. The exchange can lock its own ETH so you can buy from it. | 24 hours on the chain's clock | **Closed:** during an exit only a state with a higher number can replace an older one, and your watchtower submits the newest |
 | **Polygon, Base, BNB Chain, Avalanche** | The same `CastleVault` contract and code as Ethereum, each on its own local test node with the chain ID of that network's public test network (Amoy 80002, Base Sepolia 84532, BNB testnet 97, Fuji 43113). Coins: POL, ETH (on Base), BNB, AVAX | 24 hours on the chain's clock | Closed, as on Ethereum |
 
+### MuSig2: settling looks like a normal payment (Bitcoin and Litecoin)
+
+New Bitcoin and Litecoin vaults combine your key and the exchange's into one key with
+MuSig2 (BIP 327), used as the vault output's Taproot internal key. Settling with the exchange
+and adding buying capacity (a splice) then use that key: one 64-byte signature that only
+both of you together can make. On the chain it looks like an ordinary single-key payment, so
+it is smaller (cheaper) and doesn't show that it was a vault or that two parties signed.
+
+- Nothing else changes: the exit request, the pay-back after the exit window and the
+  revocation penalties still use the scripts, which stay hidden unless they are needed.
+- Signing takes the same messages as before: your wallet sends a fresh public nonce, the
+  exchange answers with its nonce and its partial signature, and your wallet checks it, adds
+  its own and checks the final signature before broadcasting.
+- A nonce signs once: its secret half is wiped as soon as it has been used, and nonces are
+  never saved. If a program stops halfway, that attempt is dropped and started again.
+- Vaults opened before this (and vaults from an exchange that doesn't offer MuSig2) keep the
+  old 2-of-2 script path and work as before.
+- The transaction inspector says "Key path" for these spends, and the vault's scripts list
+  starts with the combined key.
+
 ### One account, and swapping coins
 
 All the chains belong to **one test account**. The bar at the top of every tab shows
@@ -52,7 +72,7 @@ capacity"), for a 0.2% fee taken from your share. You can then buy up to that am
 your cash, or with a swap from another coin, and the coins you buy are in the vault from
 the start.
 
-- **Ethereum and the other EVM chains:** the exchange sends coins to the contract (`fund`), once per vault.
+- **Ethereum and the other EVM chains:** the exchange sends coins to the contract (`fund`), as often as needed.
 - **Bitcoin and Litecoin:** you and the exchange both sign one transaction (a "splice")
   that spends the vault plus some of the exchange's coins into a bigger vault with the same
   scripts. The exit request and the pay-back are signed again, so the old ones (and every
@@ -294,6 +314,51 @@ go run . wallet -name alice
   close them.
 - Anything you send on signet is public, like on the real network.
 
+### Public EVM test networks (Sepolia, Amoy, Base Sepolia, BNB Chain testnet, Fuji)
+
+```
+go run . chains -network testnets -exit-window 1h
+go run . exchange
+go run . wallet -name alice
+```
+
+`-network testnets` is Bitcoin signet (as above) plus the public test networks of the five
+EVM chains. Their coins have no value and come from public faucets.
+
+| Coin | Public test network | Chain ID | Free public node used |
+| --- | --- | --- | --- |
+| Ethereum | Sepolia | 11155111 | ethereum-sepolia-rpc.publicnode.com |
+| Polygon | Amoy | 80002 | polygon-amoy-bor-rpc.publicnode.com |
+| Base | Base Sepolia | 84532 | sepolia.base.org |
+| BNB Chain | BNB Chain testnet | 97 | bsc-testnet-rpc.publicnode.com |
+| Avalanche | Fuji | 43113 | api.avax-test.network |
+
+- **Safety check:** before using a node, the chains program asks it which chain it is on.
+  A main network (real coins) is always refused, and so is any chain that isn't the
+  expected test network. That chain is then left out.
+- **Choosing networks:** `-coins eth,pol` uses only those, and leaving out `btc` skips signet
+  (no signet download). `-rpc eth=https://...,pol=https://...` uses other nodes, for
+  example your own from a node provider.
+- **Exit window:** `-exit-window` sets it for new EVM vaults, from `1m` to `24h` (default
+  `24h`). With `1h` you can try "the exchange disappears" in an afternoon. Bitcoin's exit
+  window is counted in blocks and stays 144 (about a day on signet).
+- **Coins:** there's no Mine button and no faucet button. Each wallet page shows **your
+  address** on that network, with a link to the network's block explorer; send it test coins
+  from a faucet. The exchange's addresses are on its admin page and in its window.
+- **The contract:** the exchange puts the CastleVault contract on each network by itself once
+  its address there has test coins, and tells the chains program the address (kept in
+  `castlekeep-data\chains-signet\evm-public-<coin>.json`). Your wallet only uses a contract
+  whose code is exactly the CastleVault code built into the program, and refuses to lock
+  until then.
+- **Each program signs its own transactions** (EIP-1559). Nobody else can send for them.
+- **How much to send** (rough, fees change): the exchange needs enough to put the contract
+  up plus what it will lock for buyers. Sepolia, Base Sepolia, BNB Chain testnet and Fuji
+  fees are tiny now; Amoy's are higher, so send the exchange about 0.5 POL there. The page
+  starts with 0.01 to lock and 0.005 to trade.
+- Reads from the public nodes are kept for 4 seconds, so the pages and watchtowers don't
+  flood them. A node that is busy or down only slows things down; the watchtowers try again.
+- Everything you do on these networks is public.
+
 ## The screen
 
 | Area | What it does |
@@ -337,6 +402,8 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `engine.go` | Types shared by every chain |
 | `account.go` | The shared test account (one cash balance) and coin-to-coin swaps |
 | `utxo.go`, `utxo_vault.go` | Bitcoin and Litecoin engine: Taproot scripts and transactions |
+| `musig.go` | MuSig2: the combined key, nonces, partial signatures for settling and splices |
+| `evm_public.go` | The public EVM test networks (Sepolia, Amoy, Base Sepolia, BNB Chain testnet, Fuji) |
 | `eth.go` | Ethereum engine: JSON-RPC, Keccak, signatures and contract calls |
 | `evm.go` | The EVM chains (Ethereum, Polygon, Base, BNB Chain, Avalanche): names, chain IDs, test prices, icon colours, and starting Hardhat |
 | `evm_keep.go` | Keeps the EVM test chains between runs (records changes, plays them back) |
@@ -355,8 +422,13 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
   and your watchtower publishes your latest state if it pays you more.
 - **Revocation on Bitcoin and Litecoin only works if someone is watching.** Your watchtower
   must sweep an old state within 6 blocks (BTC) or 24 blocks (LTC). Ethereum uses state numbers.
-- **On Ethereum the exchange can lock buying capacity once per vault.** The contract allows
-  one deposit; Bitcoin and Litecoin allow more with further splices.
+- **Buying capacity waits for a block each time.** You can ask for more as often as you like
+  (up to 5 coins per request), but only one request waits for a block at a time. On signet
+  that is about 10 minutes per request.
+- **Changing the contract leaves old EVM vaults behind.** When the contract's code changes, the
+  chains program puts the new code on its kept local chains at the next start, and the
+  exchange and wallets drop vaults saved on the old contract (test coins only). Settle EVM
+  vaults before updating. On the public test networks the exchange puts the new code up itself.
 - **The cash side is custodial**, as on any exchange. One cash balance is shared by all coins.
 - **Swaps are two signed states, not one transaction.** They are only as safe as the two
   vaults they touch, and there is no hash-locked atomic swap.

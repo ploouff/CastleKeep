@@ -81,21 +81,30 @@ func walletScript(k *btcec.PrivateKey) []byte {
 type tapOutput struct {
 	pkScript []byte
 	tree     *txscript.IndexedTapScriptTree
+	internal *btcec.PublicKey // numsKey (scripts only), or a MuSig2 combined key (musig.go)
 }
 
-func newTapOutput(leaves ...txscript.TapLeaf) *tapOutput {
+func newTapOutput(leaves ...txscript.TapLeaf) *tapOutput { return newTapOutputKey(numsKey, leaves...) }
+
+// newTapOutputKey is a Taproot output with these scripts and internal key.
+func newTapOutputKey(internal *btcec.PublicKey, leaves ...txscript.TapLeaf) *tapOutput {
 	tree := txscript.AssembleTaprootScriptTree(leaves...)
 	root := tree.RootNode.TapHash()
-	pk, err := txscript.PayToTaprootScript(txscript.ComputeTaprootOutputKey(numsKey, root[:]))
+	pk, err := txscript.PayToTaprootScript(txscript.ComputeTaprootOutputKey(internal, root[:]))
 	if err != nil {
 		panic(err)
 	}
-	return &tapOutput{pkScript: pk, tree: tree}
+	return &tapOutput{pkScript: pk, tree: tree, internal: internal}
 }
+
+func (o *tapOutput) root() []byte { r := o.tree.RootNode.TapHash(); return r[:] }
+
+// keyPath reports whether the output can be spent with a MuSig2 signature.
+func (o *tapOutput) keyPath() bool { return o.internal != numsKey }
 
 func (o *tapOutput) controlBlock(leaf txscript.TapLeaf) []byte {
 	idx := o.tree.LeafProofIndex[leaf.TapHash()]
-	cb := o.tree.LeafMerkleProofs[idx].ToControlBlock(numsKey)
+	cb := o.tree.LeafMerkleProofs[idx].ToControlBlock(o.internal)
 	b, err := cb.ToBytes()
 	if err != nil {
 		panic(err)
@@ -243,7 +252,13 @@ func newVault(userPayout, exchPayout []byte, delay, penaltyDelay int64) *Vault {
 	}
 	v.multisigLeaf = txscript.NewBaseTapLeaf(ms)
 	v.delayLeaf = txscript.NewBaseTapLeaf(dl)
-	v.V = newTapOutput(v.multisigLeaf)
+	// The vault output's internal key is both keys combined with MuSig2, so a
+	// settlement or a splice can use the key path (musig.go).
+	ik, err := musigInternal(xonly(uk), xonly(ek))
+	if err != nil {
+		panic(err)
+	}
+	v.V = newTapOutputKey(ik, v.multisigLeaf)
 	v.E = newTapOutput(v.multisigLeaf, v.delayLeaf)
 	return v
 }
@@ -436,8 +451,22 @@ func (v *Vault) cooperativeSettle() *wire.MsgTx {
 	// Settling spends the vault directly with both signatures, so no old
 	// state can be involved and each share goes straight to its owner.
 	tx, _, _, _, _ := v.payoutTx(v.vaultOut, v.vaultAmt, l.UserSats, l.ExchSats, v.userPayout, v.exchPayout)
-	v.witnessBoth(tx, v.vaultAmt, v.V, nil)
+	v.keySpend(tx, 0, txscript.NewCannedPrevOutputFetcher(v.V.pkScript, v.vaultAmt))
 	return tx
+}
+
+// keySpend signs input idx (the vault) through the key path: one MuSig2
+// signature from both keys, which looks like any single-key payment.
+func (v *Vault) keySpend(tx *wire.MsgTx, idx int, fetch txscript.PrevOutputFetcher) {
+	ks, err := newKeySpend(xonly(v.userKey), xonly(v.exchKey), v.V, tx, idx, fetch)
+	if err != nil {
+		panic(err)
+	}
+	sig, err := musigBoth(ks, v.userKey, v.exchKey)
+	if err != nil {
+		panic(err)
+	}
+	tx.TxIn[idx].Witness = wire.TxWitness{sig}
 }
 
 // userClaim is the pre-signed pay-back of deposits, valid after the delay.
@@ -478,16 +507,9 @@ func (v *Vault) spliceTx(ins []utxo, exchScript []byte, exchWallet *btcec.Privat
 	if change := in - sats - txFee; change > 546 {
 		tx.AddTxOut(wire.NewTxOut(change, exchScript))
 	}
-	hashes := txscript.NewTxSigHashes(tx, txscript.NewMultiPrevOutFetcher(prevs))
-	userSig, err := txscript.RawTxInTapscriptSignature(tx, hashes, 0, v.vaultAmt, v.V.pkScript, v.multisigLeaf, txscript.SigHashDefault, v.userKey)
-	if err != nil {
-		return nil, err
-	}
-	exchSig, err := txscript.RawTxInTapscriptSignature(tx, hashes, 0, v.vaultAmt, v.V.pkScript, v.multisigLeaf, txscript.SigHashDefault, v.exchKey)
-	if err != nil {
-		return nil, err
-	}
-	tx.TxIn[0].Witness = wire.TxWitness{exchSig, userSig, v.multisigLeaf.Script, v.V.controlBlock(v.multisigLeaf)}
+	fetch := txscript.NewMultiPrevOutFetcher(prevs)
+	hashes := txscript.NewTxSigHashes(tx, fetch)
+	v.keySpend(tx, 0, fetch) // both sides, through the MuSig2 key path
 	for i := 1; i < len(tx.TxIn); i++ {
 		p := prevs[tx.TxIn[i].PreviousOutPoint]
 		wit, err := txscript.TaprootWitnessSignature(tx, hashes, i, p.Value, p.PkScript, txscript.SigHashDefault, exchWallet)

@@ -33,6 +33,7 @@ type vaultDef struct {
 	userPay, exchPay []byte // where each side's coins are paid
 	delay, d2        int64
 	anchors          bool // exit requests carry an anchor output for each side (vaults opened since fees.go)
+	musig            bool // the vault output has the MuSig2 combined key: settle and splice use the key path (musig.go)
 	ms, dl           txscript.TapLeaf
 	V, E             *tapOutput
 }
@@ -61,6 +62,35 @@ func newVaultDef(user, exch, userPay, exchPay []byte, delay, d2 int64) (*vaultDe
 	d.V = newTapOutput(d.ms)
 	d.E = newTapOutput(d.ms, d.dl)
 	return d, nil
+}
+
+// setMuSig2 gives the vault output the MuSig2 combined key of both sides, so
+// a settlement or a splice can use the key path. The scripts stay the same.
+// Vaults opened before musig.go keep the key path switched off.
+func (d *vaultDef) setMuSig2(on bool) error {
+	d.musig = on
+	if !on {
+		d.V = newTapOutput(d.ms)
+		return nil
+	}
+	k, err := musigInternal(d.user, d.exch)
+	if err != nil {
+		return err
+	}
+	d.V = newTapOutputKey(k, d.ms)
+	return nil
+}
+
+// vaultSpend is the key-path signing data for input idx (the vault) of tx.
+func (d *vaultDef) vaultSpend(tx *wire.MsgTx, idx int, fetch txscript.PrevOutputFetcher) (*keySpend, error) {
+	return newKeySpend(d.user, d.exch, d.V, tx, idx, fetch)
+}
+
+// withKeySig returns a copy of tx with a key-path witness (one signature) on input 0.
+func withKeySig(tx *wire.MsgTx, sig []byte) *wire.MsgTx {
+	c := tx.Copy()
+	c.TxIn[0].Witness = wire.TxWitness{sig}
+	return c
 }
 
 // vgen is one generation: the vault output, its exit request and pay-back.

@@ -88,6 +88,7 @@ type defRec struct {
 	User, Exch, UserPay, ExchPay []byte
 	Delay, D2                    int64
 	Anchors                      bool `json:",omitempty"`
+	MuSig2                       bool `json:",omitempty"`
 }
 
 type genRec struct {
@@ -112,7 +113,7 @@ type vaultRec struct {
 }
 
 func saveVault(d *vaultDef, gens []*vgen, states []*pstate) vaultRec {
-	r := vaultRec{Def: defRec{d.user, d.exch, d.userPay, d.exchPay, d.delay, d.d2, d.anchors}}
+	r := vaultRec{Def: defRec{d.user, d.exch, d.userPay, d.exchPay, d.delay, d.d2, d.anchors, d.musig}}
 	for _, g := range gens {
 		r.Gens = append(r.Gens, genRec{g.vaultOut, g.vaultAmt, g.userDep, g.exchDep, g.exitSigU, g.exitSigX, g.refundSigU, g.refundSigX})
 	}
@@ -130,6 +131,9 @@ func (r vaultRec) load() (*vaultDef, []*vgen, []*pstate, error) {
 		return nil, nil, nil, err
 	}
 	d.anchors = r.Def.Anchors
+	if err := d.setMuSig2(r.Def.MuSig2); err != nil {
+		return nil, nil, nil, err
+	}
 	var gens []*vgen
 	for _, gr := range r.Gens {
 		g := d.buildGen(gr.Out, gr.Amt, gr.UserDep, gr.ExchDep)
@@ -446,6 +450,9 @@ func (x *Exchange) Load(path string) (bool, error) {
 			return false, err
 		}
 		xe.key, xe.addr, xe.price, xe.mode = k, ethAddress(k), er.Price, er.Mode
+		if xe.c.public && xe.c.contract == "" && er.Contract != "" && xe.c.codeOK(er.Contract) {
+			xe.c.contract = er.Contract // the chains program forgot it; the exchange tells it again
+		}
 		if strings.EqualFold(er.Contract, xe.c.contract) {
 			for _, vr := range er.Vaults {
 				id, ok := new(big.Int).SetString(vr.ID, 10)
@@ -457,7 +464,7 @@ func (x *Exchange) Load(path string) (bool, error) {
 					closed: vr.Closed, events: vr.Events}
 			}
 		} else if len(er.Vaults) > 0 {
-			fmt.Printf("The %s test node was restarted (new contract), so the saved %s vaults are gone with it.\n", xe.ticker, xe.ticker)
+			fmt.Printf("The %s contract changed (a restarted test node, or a new version of the contract), so the vaults saved on the old one are left out.\n", evmName(chain))
 		}
 	}
 	x.books = map[string]*book{}
@@ -678,6 +685,9 @@ func (w *Wallet) Load(path string) (bool, error) {
 			return false, err
 		}
 		we.key, we.addr, we.exchAddr, we.vault = k, ethAddress(k), er.ExchAddr, nil
+		if we.c.public && we.c.contract == "" && er.Contract != "" && we.c.codeOK(er.Contract) {
+			we.c.contract = er.Contract // the chains program forgot it
+		}
 		if vr := er.Vault; vr != nil {
 			id, ok := new(big.Int).SetString(vr.ID, 10)
 			if ok && strings.EqualFold(er.Contract, we.c.contract) {
@@ -685,7 +695,7 @@ func (w *Wallet) Load(path string) (bool, error) {
 					closeTx: vr.CloseTx, closed: vr.Closed, capPending: vr.CapPending, capSats: vr.CapSats,
 					userLast: vr.UserLast, userPend: vr.UserPend, exchFault: vr.ExchFault, Events: vr.Events}
 			} else if ok {
-				fmt.Printf("The %s test node was restarted (new contract), so your saved %s vault is gone with it.\n", we.ticker, we.ticker)
+				fmt.Printf("The %s contract changed (a restarted test node, or a new version of the contract), so your vault saved on the old one is left out.\n", evmName(chain))
 			}
 		}
 	}

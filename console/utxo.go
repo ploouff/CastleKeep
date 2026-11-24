@@ -638,7 +638,7 @@ func (e *UTXOEngine) addCapacity(sats int64) error {
 	}
 	e.outLabels[v.vaultOut] = IO{Label: "Vault (you + exchange)", Sats: v.vaultAmt, Ref: v.vaultOut.String()}
 	if err := e.broadcast(tx, fmt.Sprintf("Exchange adds %s to your vault", e.fmt(sats)),
-		"Vault script: both sign, plus the exchange's wallet key for its coins", v.multisigLeaf.Script,
+		"Key path: one MuSig2 signature made by both of you together (no script shown on the chain), plus the exchange's wallet key for its coins", nil,
 		fmt.Sprintf("The exchange is adding %s to your vault", e.fmt(sats)), "The exchange's deposit was rejected"); err != nil {
 		return nil
 	}
@@ -734,7 +734,7 @@ func (e *UTXOEngine) canTrade(side string, sats int64) error {
 			if v.exchDeposit == 0 {
 				return userErr("You can only buy back %s sold from this vault (%s). Ask the exchange to lock buying capacity to buy more.", t, e.fmt(l.ExchSats))
 			}
-			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy.", e.fmt(l.ExchSats))
+			return userErr("The exchange's side of the vault holds %s, so that's the most you can buy. Ask for more buying capacity to buy more.", e.fmt(l.ExchSats))
 		}
 	default:
 		return userErr("Unknown order side.")
@@ -795,8 +795,8 @@ func (e *UTXOEngine) settle() error {
 		return nil
 	}
 	tx := v.cooperativeSettle()
-	if err := e.broadcast(tx, "Cooperative settlement", "Vault script: you and the exchange both sign now",
-		v.multisigLeaf.Script, "Settled: coins on their way back to your wallet", "Settlement rejected"); err == nil {
+	if err := e.broadcast(tx, "Cooperative settlement", "Key path: one MuSig2 signature made by you and the exchange together. On the chain it looks like an ordinary single-key payment: no script, no second key",
+		nil, "Settled: coins on their way back to your wallet", "Settlement rejected"); err == nil {
 		v.closeTxid, v.closeKind = tx.TxHash().String(), "settled"
 	}
 	return nil
@@ -1153,10 +1153,10 @@ func (e *UTXOEngine) Snapshot() Snapshot {
 			SweepKind: v.sweepKind, SweepTxid: v.sweepTxid,
 			PublishedBy: v.publishedBy, UserDeposit: v.userDeposit, ExchDeposit: v.exchDeposit,
 			FundPending: v.gen > 0 && e.confs(v.fundTxid) == 0,
-			Scripts: []Labelled{
+			Scripts: append(keyPathNote(v.V), []Labelled{
 				{"Both must sign (vault and exit output)", v.friendlyScript(v.multisigLeaf.Script)},
 				{fmt.Sprintf("Pay-back of deposits, %d blocks after the exit request (both signed it when the vault opened, so you can use it alone)", v.delay), v.friendlyScript(v.delayLeaf.Script)},
-			},
+			}...),
 		}
 		if v.published != nil {
 			vv.PublishedState = v.published.Index

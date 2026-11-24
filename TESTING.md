@@ -178,6 +178,40 @@ coloured badges drawn by the page.
 
 Base's coin is ETH too; the swap list calls it "ETH on Base" to tell it apart from Ethereum.
 
+## H. Public EVM test networks (Sepolia, Amoy, Base Sepolia, BNB Chain testnet, Fuji)
+
+The automatic tests `TestPublicEVMNetwork` and `TestPublicEVMRestart` run this on a Hardhat
+node that behaves like a public network (it mines by itself and can't send for anyone), and
+`TestPublicChainCheck` checks that a main network is refused. By hand:
+
+1. First window: `go run . chains -network testnets -exit-window 1h`. To start with just
+   Sepolia and skip the signet download: `-coins eth`. Each network prints "connected".
+2. Second window: `go run . exchange`. It prints the exchange's address on each network.
+3. Third window: `go run . wallet -name alice`. It prints your addresses; they are also on
+   the page under **Your wallet**.
+4. From a faucet for that network, send test coins to the **exchange's** address. Within
+   about half a minute the exchange window says it put the CastleVault contract on the
+   network, and the chains window shows its address.
+5. Send test coins to **your** address and press **Check for coins sent to your address**.
+6. Lock `0.01` and wait a few seconds: the vault opens. Sell `0.005`, then settle.
+7. Exit test: lock again, set the exchange to **Offline**, **Request exit**, wait the hour,
+   then press **Pay out after the window**.
+8. The link under your address opens your transactions on the network's block explorer.
+
+## I. MuSig2 settlements (Bitcoin and Litecoin)
+
+`go test -run MuSig2 -v` checks that settlements and splices on new vaults are a single
+64-byte signature on the chain, that a damaged partial signature from the exchange is refused
+(and settling again then works), that a nonce can't sign twice, that nothing about a half-done
+signing is saved, and that vaults opened without MuSig2 still use the script. By hand:
+
+1. Open a Bitcoin vault (console or separate programs), trade, then **Settle with the
+   exchange** and mine a block.
+2. In **Activity**, click **Inspect transaction** under "Cooperative settlement": the
+   Transaction inspector says "Key path: one MuSig2 signature…".
+3. Under **Show the vault's scripts**, the first entry is the combined key; the scripts below
+   it are the hidden backup paths.
+
 ## What a failure looks like
 
 - Automatic tests: a `--- FAIL` line with the expected and actual values.

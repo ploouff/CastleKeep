@@ -30,13 +30,15 @@ type ChainInfo struct {
 	ClaimLabel   string       `json:"claimLabel"`
 	DefaultLock  string       `json:"defaultLock"`
 	DefaultOrder string       `json:"defaultOrder"`
-	Model        string       `json:"model"`            // one-line description of how the vault works here
-	DualFund     bool         `json:"dualFund"`         // the exchange can lock buying capacity
-	TestCash     bool         `json:"testCash"`         // a button to add test dollars
-	Signet       bool         `json:"signet,omitempty"` // Bitcoin's public signet: no mine buttons, no faucet
-	EVM          bool         `json:"evm,omitempty"`    // runs the CastleVault contract (Ethereum, Polygon, Base, BNB Chain, Avalanche)
-	Color        string       `json:"color,omitempty"`  // coin icon colour
-	Badge        string       `json:"badge,omitempty"`  // coin icon text
+	Model        string       `json:"model"`              // one-line description of how the vault works here
+	DualFund     bool         `json:"dualFund"`           // the exchange can lock buying capacity
+	TestCash     bool         `json:"testCash"`           // a button to add test dollars
+	Signet       bool         `json:"signet,omitempty"`   // Bitcoin's public signet: no mine buttons, no faucet
+	EVM          bool         `json:"evm,omitempty"`      // runs the CastleVault contract (Ethereum, Polygon, Base, BNB Chain, Avalanche)
+	Color        string       `json:"color,omitempty"`    // coin icon colour
+	Badge        string       `json:"badge,omitempty"`    // coin icon text
+	Public       bool         `json:"public,omitempty"`   // a public EVM test network (Sepolia, Amoy, ...): no mine buttons, no faucet
+	Explorer     string       `json:"explorer,omitempty"` // that network's block explorer
 }
 
 type ActionReq struct {

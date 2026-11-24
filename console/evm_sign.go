@@ -76,10 +76,6 @@ func (e *EthEngine) sendSigned(tx map[string]string, key *btcec.PrivateKey) (str
 	if err != nil {
 		return "", err
 	}
-	tip := big.NewInt(1_000_000_000) // 1 gwei unless the node says otherwise
-	if t, err := e.callStr("eth_maxPriorityFeePerGas"); err == nil {
-		tip = hexBig(t)
-	}
 	raw, err := e.call("eth_getBlockByNumber", "latest", false)
 	if err != nil {
 		return "", err
@@ -89,9 +85,24 @@ func (e *EthEngine) sendSigned(tx map[string]string, key *btcec.PrivateKey) (str
 		return "", err
 	}
 	base := hexBig(blk.BaseFeePerGas)
+	// The tip: what the node suggests, but at least what its plain gas price
+	// leaves above the base fee (some networks, such as BNB Chain, have no
+	// base fee and a minimum gas price), and never zero.
+	tip := big.NewInt(0)
+	if t, err := e.callStr("eth_maxPriorityFeePerGas"); err == nil {
+		tip = hexBig(t)
+	}
+	if g, err := e.callStr("eth_gasPrice"); err == nil {
+		if left := new(big.Int).Sub(hexBig(g), base); left.Cmp(tip) > 0 {
+			tip = left
+		}
+	}
+	if tip.Sign() == 0 {
+		tip = big.NewInt(1_000_000_000) // 1 gwei
+	}
 	maxFee := new(big.Int).Add(new(big.Int).Mul(base, big.NewInt(2)), tip)
-	to := hexBytes(tx["to"])
-	if len(to) != 20 {
+	to := hexBytes(tx["to"]) // empty: a new contract
+	if len(to) != 20 && len(to) != 0 {
 		return "", errors.New("sending to an address that isn't 20 bytes")
 	}
 	value := big.NewInt(0)
@@ -117,6 +128,7 @@ func (e *EthEngine) sendSigned(tx map[string]string, key *btcec.PrivateKey) (str
 	if want := "0x" + hex.EncodeToString(keccak(rawTx)); !strings.EqualFold(hash, want) {
 		return "", fmt.Errorf("the node returned hash %s for transaction %s", hash, want)
 	}
+	e.cache.forget() // what this program reads next should include it
 	return hash, nil
 }
 

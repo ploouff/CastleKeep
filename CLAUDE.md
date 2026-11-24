@@ -2,8 +2,9 @@
 
 Castlekeep is a prototype of self-custodial exchange settlement: the user locks coins in a
 vault that needs both the user's and the exchange's signatures, trades against it, and can
-always get out alone after an exit window. **Test networks only: local test chains, or
-Bitcoin's public signet** (coins with no value; the user approved signet on 2026-11-23).
+always get out alone after an exit window. **Test networks only: local test chains, Bitcoin's public signet, or the public EVM test
+networks** Sepolia, Polygon Amoy, Base Sepolia, BNB Chain testnet and Avalanche Fuji (coins
+with no value; the user approved signet on 2026-11-23 and the EVM test networks on 2026-11-25).
 Never use real coins, mainnet, or real money, and never describe the code as secure or
 audited (it isn't).
 
@@ -33,7 +34,9 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | `console/split_book.go`, `split_book_test.go` | Order book (separate programs): limit orders, matching (best price, then oldest), reservations, fills each wallet checks against its own order before signing. Page: the "Order book" panel in `index.html` (only shown when the snapshot has `book`), actions `place`/`cancel` via `bookAction`; several wallets with `go run . wallet -name bob -port 9301`. |
 | `console/split_save.go`, `split_save_test.go` | Saving: the exchange (`exchange.json`) and each wallet (`wallet-<name>.json`) save only inputs (keys, amounts, signatures, secrets, some tx hex) after every request/tick and rebuild scripts and txs on `Load`. Half-done steps (`pend`) are dropped. Files are refused if made on another chain (`chainConn.tag` = hash of block 1). Kept chains: `keepChain`, `keepBlocks`/`replayBlocks`, `miner.json`, `eth.json` (kept contract). Flags `-data`, `-fresh` (renames old data, never deletes). Default folder `%USERPROFILE%\castlekeep-data`. |
 | `console/split_signet.go` | Bitcoin signet: `go run . chains -network signet` (Bitcoin only; btcd with `--signet --addrindex`, data in `castlekeep-data\chains-signet`). No mining or faucet; exchange and wallets find coins sent to their addresses with `searchrawtransactions` (`coinsTo`, every 15 s, or the page's "Check for coins" button). |
-| `console/evm_sign.go` | Groundwork for public EVM test networks: local EIP-1559 (type 2) signing with RLP (`sendSigned`), used by `sendRaw` when `EthEngine.signLocal` is on (`EthEndpoint.SignLocally`) and `signer` has the key (set in `AttachEVM` for exchange and wallet). `TestSplitSignedLocally` runs the separate programs on Hardhat with impersonation off. Not wired to any public network yet: that still needs funded keys (faucets), contract deployment and no mine/faucet buttons, like signet. |
+| `console/evm_sign.go` | Local EIP-1559 (type 2) signing with RLP (`sendSigned`), used by `sendRaw` when `EthEngine.signLocal` is on (`EthEndpoint.SignLocally`) and `signer` has the key (set in `AttachEVM` for exchange and wallet). `TestSplitSignedLocally` runs the separate programs on Hardhat with impersonation off. Used on the public EVM test networks (`evm_public.go`); also signs contract creation (empty `to`), tip = max(node tip, gas price - base fee, 1 gwei if 0). |
+| `console/evm_public.go` | Public EVM test networks: `go run . chains -network testnets` (signet + Sepolia, Amoy, Base Sepolia, BNB Chain testnet, Fuji; `-coins`, `-rpc id=url`, `-exit-window 1m..24h`, which also applies to local EVM chains). `checkTestChain` asks `eth_chainId` and refuses main networks (`mainNets`, `evmChain.MainID`) and wrong chains. `publicEVM` in the chains program runs no node; `/contract` keeps the address the exchange reports after `codeOK` (on-chain code is part of `CastleVault.bin`), saved in `castlekeep-data/chains-signet/evm-public-<id>.json`. Exchange `evmSetup` deploys once its address has coins, then `announce`s; wallet `evmSetup` looks the address up and checks the code (`we.checked`) before `EthOpen`. `rpcCache` keeps reads 4 s (`cacheFor`; tests set `cacheFor`, `setupEvery`, `lookEvery` to 0) and final receipts. `rpcClient` has a 30 s timeout. Public node URLs and explorers are in `evmChains` (`RPC`, `Explorer`). Page: `ChainInfo.Public`/`Explorer`, `isPublic(c)` in `index.html`. Tests: `evm_public_test.go` (Hardhat with the Sepolia chain ID, no impersonation). |
+| `console/musig.go`, `musig_test.go` | MuSig2 key path for BTC/LTC vaults (settle and splice): combined key, `musigNonce` (single use), `keySpend` (`sign`, `verifyPartial`, `combine`), `keyPathNote` for the page. Uses `btcec/v2/schnorr/musig2` from the pinned btcec v2.3.4 (no new dependency). See "Design in one screen". |
 | `console/seal.go` | Password-protected save files: `-password` / `-remove-password` on exchange and wallet (`startSealed`, `passwordFor`), scrypt N=32768 + AES-256-GCM, sealed JSON `{"castlekeep":"sealed",...}`; `x.seal`/`w.seal` used by `save()` and `Load` (`readSaved`). A plain file is copied to `.unprotected-<time>` before sealing. `CASTLEKEEP_PASSWORD` for scripts/tests. Password prompt uses `golang.org/x/crypto/ssh/terminal` (already pinned). |
 | `console/fees.go` | Separate programs, BTC/LTC: fee estimate (`feeRate`: btcd `estimatefee`, else 2 sat/vB), "Speed up" (`SpeedUp`, `bump`: child pays for parent from the wallet's output of a waiting tx, plus confirmed coins if needed), `bumpable` (skips a tx that already has a mempool child), watchtower `autoBump` after 2 blocks during an exit. New vaults have `vaultDef.anchors`: the exit request gets a 330-unit output for each side (`OpenKeysResp.Anchors`, saved as `defRec.Anchors`; old vaults rebuild without). |
 | `console/evm.go` | The EVM chains (`evmChains`: eth, pol, base, bnb, avax) with chain IDs of their public TEST networks, test prices, icon colour/badge; `evmConfig`, `startHardhat` (writes a temp config with `chainId`, `allowBlocksWithSameTimestamp`, optional `initialDate`), `chainOrder`. All EVM chains use `EthEngine` / `xEth` / `wEth` keyed by chain ID (`x.evm`, `w.evm`; empty `Chain` in a message means eth). |
@@ -78,6 +81,16 @@ U_n  ├─ <D2> CSV DROP <user> CHECKSIG                 user claims after D2
   signs a new state (fee 0.2% from the user's share). The exchange wallet starts with 20
   coins (`exchangeStock`); the snapshot reports the change from that.
 - Cooperative settlement spends V directly with both signatures (no revocation needed).
+- MuSig2 (`musig.go`): new vaults have V's internal key = MuSig2(user, exch) (sorted, x-only
+  keys as even-y points; `evenKey` negates a private key whose point is odd) instead of the
+  NUMS key. Settle and splice spend V through the key path (one 64-byte sig); exit request,
+  pay-back and state payouts stay on the scripts, and E keeps the NUMS key. `vaultDef.musig` /
+  `setMuSig2`, `OpenKeysResp.MuSig2`, `defRec.MuSig2`; old vaults rebuild without it.
+  Messages: `SettleReq.UserNonce` -> `SettleResp.ExchNonce/ExchPartial`;
+  `CapacityReq.UserNonce` -> `CapacityOffer.SpliceNonce/SplicePartial` ->
+  `CapacityCommitReq.SplicePartial`. `musigNonce` wipes its secret after one `sign`; secret
+  nonces are never saved (pending splices are dropped on load). `newVaultsMuSig2` (tests)
+  makes old-style vaults. The one-program console signs with both keys (`musigBoth`).
 
 **Separate programs (work in progress)**: `split_*.go`. Message order: opening
 gets the exchange's signatures on exit, pay-back and state #0 before the deposit is sent;

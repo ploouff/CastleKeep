@@ -531,11 +531,18 @@ func ethFundCapacityAndBuy(h *harness) {
 
 func ethCapacity(h *harness) {
 	ethFundCapacityAndBuy(h)
+	// Ask again for more: refused while the request waits for a block, then added.
+	h.do(ActionReq{Action: "capacity", Sats: oneCoin / 2})
+	h.doUserErr(ActionReq{Action: "capacity", Sats: oneCoin / 2}, "still waiting for a block")
+	h.mine(1)
+	if v := h.vault(); v.ExchDeposit != 3*oneCoin/2 || v.Locked != 5*oneCoin/2 || v.UserSats != 179_800_000-capacityFee(oneCoin/2) {
+		h.t.Fatalf("after a second top-up: exchange deposit %d, locked %d, yours %d", v.ExchDeposit, v.Locked, v.UserSats)
+	}
 	w1 := h.wallet()
 	h.do(ActionReq{Action: "settle"})
 	h.mine(1)
 	h.expectStatus("closed")
-	h.ethWithin("paid back on settlement", h.wallet()-w1, 179_800_000)
+	h.ethWithin("paid back on settlement", h.wallet()-w1, 179_800_000-capacityFee(oneCoin/2))
 }
 
 func ethCapacityExit(h *harness) {

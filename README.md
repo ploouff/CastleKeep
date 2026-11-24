@@ -69,10 +69,10 @@ running the contract), not from the app's own logic.
 
 | Chain | Vault | Old-state attack |
 | --- | --- | --- |
-| Bitcoin | Taproot 2-of-2 script with a 144-block timelock, plus exchange coins added by a splice so you can buy new BTC | Two-way revocation secrets: whoever publishes an old state loses their share of it |
+| Bitcoin | Taproot 2-of-2 script with a 144-block timelock, plus exchange coins added by a splice so you can buy new BTC. Settling and splices use one MuSig2 key (looks like a normal payment) | Two-way revocation secrets: whoever publishes an old state loses their share of it |
 | Litecoin | The same Taproot scripts, 576-block timelock | Same revocation design as Bitcoin |
 | Ethereum | Smart contract where only a newer signed state can replace an older one, plus exchange-funded buying | **Closed** |
-| Polygon, Base, BNB Chain, Avalanche | The same contract as Ethereum, each on its own local test chain | **Closed** |
+| Polygon, Base, BNB Chain, Avalanche | The same contract as Ethereum, each on its own local test chain, or on its public test network | **Closed** |
 | Solana | Program design following the Ethereum model | Design only |
 
 All chains share **one test account**: a bar at the top of the console shows every coin
@@ -81,6 +81,12 @@ All chains share **one test account**: a bar at the top of the console shows eve
 coin you buy first, then you sign the sale. It is two vault states on two chains, not one
 transaction (and not a hash-locked "atomic swap"), so each side is protected by its own
 chain's rules as usual.
+
+Everything runs on local test chains by default. The separate programs can also run on
+public test networks, where coins come from faucets and have no value: Bitcoin's signet,
+and Sepolia, Polygon Amoy, Base Sepolia, BNB Chain testnet and Avalanche Fuji
+(`go run . chains -network testnets`; see [`console/README.md`](console/README.md)). Main
+networks with real coins are refused.
 
 ## Quick start
 
@@ -137,9 +143,9 @@ This is a proof of concept, not a product.
 - [x] Save the exchange, wallets and test chains between runs
 - [ ] Compile and test the Solana program
 - [x] Polygon, Base, BNB Chain and Avalanche (the Ethereum contract on local test chains)
-- [ ] Deploy the contract to public EVM test networks (Sepolia, Amoy, Base Sepolia, BNB testnet, Fuji)
+- [x] Public EVM test networks: Sepolia, Amoy, Base Sepolia, BNB Chain testnet, Fuji (separate programs; the exchange deploys the contract)
 - [x] Run on signet, Bitcoin's public test network (separate programs, Bitcoin only)
-- [ ] MuSig2 key-path settlements (cheaper and more private)
+- [x] MuSig2 key-path settlements and splices on Bitcoin and Litecoin (new vaults; cheaper and more private)
 - [x] Fee bumping (child pays for parent, anchor outputs on the exit request; separate programs)
 - [ ] Real fee estimation (btcd usually has no estimate; a minimum rate is used)
 - [ ] Lightning-channel version for near-instant deposits and withdrawals

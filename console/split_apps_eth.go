@@ -33,7 +33,12 @@ func (x *Exchange) ethAdminView(out *XStateResp) {
 }
 
 func (x *Exchange) evmAdminView(xe *xEth, out *XStateResp) {
-	out.Chains = append(out.Chains, XChainView{xe.id, xe.ticker, xe.mode, xe.price, fromWei(xe.c.balance(xe.addr)), "", evmName(xe.id), evmColor(xe.id), evmBadge(xe.id)})
+	name, addr := evmName(xe.id), ""
+	if xe.c.public {
+		c, _ := evmByID(xe.id)
+		name, addr = c.netName(), xe.addr
+	}
+	out.Chains = append(out.Chains, XChainView{xe.id, xe.ticker, xe.mode, xe.price, fromWei(xe.c.balance(xe.addr)), addr, name, evmColor(xe.id), evmBadge(xe.id), xe.setupNote})
 	for id, v := range xe.vaults {
 		if len(v.states) == 0 {
 			continue
@@ -56,7 +61,8 @@ type walletEthEngine struct {
 	info         ChainInfo
 	chains, exch string
 	eventLog
-	copied int
+	copied   int
+	lastNote string // public test networks: the last setup note shown
 }
 
 func (e *walletEthEngine) Info() ChainInfo     { return e.info }
@@ -71,10 +77,22 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 	ok := ""
 	switch r.Action {
 	case "faucet":
+		if e.info.Public {
+			if bal := w.EthBalance(e.id); bal > 0 {
+				ok = "Your address holds " + fmtCoin(bal, e.info.Ticker)
+			} else {
+				err = userErr("Nothing has arrived at %s yet. Coins from a faucet show up in a block or two (a few seconds).", w.EthAddress(e.id))
+			}
+			break
+		}
 		if err = call(e.chains, "/faucet", FaucetReq{Chain: e.id, Addr: w.evm[e.id].addr, Sats: unit}, nil); err == nil {
 			ok = "Received 1 test " + e.info.Ticker
 		}
 	case "mine":
+		if e.info.Public {
+			err = userErr("Blocks come by themselves on this network; there's nothing to mine.")
+			break
+		}
 		if err = call(e.chains, "/mine", MineReq{Chain: e.id, N: r.N, Secs: r.Secs}, nil); err == nil {
 			call(e.exch, "/v1/tick", empty{}, nil)
 			w.Tick()
@@ -82,7 +100,7 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 		}
 	case "lock":
 		if err = w.EthOpen(e.id, r.Sats); err == nil {
-			ok = "Locked " + fmtCoin(r.Sats, e.info.Ticker) + ". Mine a block; your wallet then agrees state #0 with the exchange"
+			ok = "Locked " + fmtCoin(r.Sats, e.info.Ticker) + ". " + e.nextBlock() + "; your wallet then agrees state #0 with the exchange"
 		}
 	case "order":
 		if err = w.EthOrder(e.id, r.Side, r.Sats); err == nil {
@@ -102,7 +120,7 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 		}
 	case "capacity":
 		if err = w.EthCapacity(e.id, r.Sats); err == nil {
-			ok = "The exchange is locking " + fmtCoin(r.Sats, e.info.Ticker) + ". Mine a block to confirm it"
+			ok = "The exchange is locking " + fmtCoin(r.Sats, e.info.Ticker) + ". " + map[bool]string{true: "It confirms in the next block, in a few seconds", false: "Mine a block to confirm it"}[e.info.Public]
 		}
 	case "cash":
 		if _, err = w.AddCash(); err == nil {
@@ -159,6 +177,13 @@ func (e *walletEthEngine) Snapshot() Snapshot {
 	now := c.chainTime()
 	s.ChainTime = time.Unix(now, 0).UTC().Format("2 Jan 15:04 UTC")
 	s.WalletSats = fromWei(c.balance(we.addr))
+	if e.info.Public {
+		s.ReceiveAddr = we.addr
+		if we.setupNote != "" && we.setupNote != e.lastNote {
+			e.add(s.Height, "info", "Setting up "+e.info.Name, we.setupNote, "")
+		}
+		e.lastNote = we.setupNote
+	}
 	v := we.vault
 	if v == nil {
 		s.Events = e.events
@@ -174,7 +199,7 @@ func (e *walletEthEngine) Snapshot() Snapshot {
 		Address: c.contract + " (vault #" + v.id.String() + ")", CloseKind: v.closed, CloseTxid: v.closeTx,
 		Scripts: []Labelled{
 			{"Settle now: both sign a separate settle message for the latest state", "settle(id, nonce, userAmount, userSig, exchangeSig)\nsignatures are on settleHash(...), not on a trade state\n" + ruleSig},
-			{"During the 24-hour exit window", "submitState(...)\nrequire(nonce > bestNonce)   // only a newer state wins"},
+			{"During the " + durText(we.delay) + " exit window", "submitState(...)\nrequire(nonce > bestNonce)   // only a newer state wins"},
 			{"After the window", "finalize(id)\npays the newest submitted state, or refunds each side its own deposit if nobody submitted one"},
 		}}
 	if len(v.states) > 0 {
@@ -218,4 +243,13 @@ func (e *walletEthEngine) Snapshot() Snapshot {
 	}
 	s.Vault = vv
 	return s
+}
+
+// nextBlock says how the next block comes: by itself on a public test
+// network, or with the mine button on a local one.
+func (e *walletEthEngine) nextBlock() string {
+	if e.info.Public {
+		return "It confirms in the next block, in a few seconds"
+	}
+	return "Mine a block"
 }

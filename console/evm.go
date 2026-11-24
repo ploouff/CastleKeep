@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -23,16 +24,20 @@ type evmChain struct {
 	BlockSecs        float64
 	Price            int64  // test price, whole dollars
 	Color, Badge     string // for the coin icon on the pages
+	Network          string // its public test network (evm_public.go)
+	RPC              string // a free public node for that network
+	Explorer         string // that network's block explorer
+	MainID           int64  // the chain ID of its MAIN network, which is always refused
 }
 
 // evmChains lists every EVM chain. Ethereum comes first; its node is the one
 // started with -eth-rpc (or Anvil), as before.
 var evmChains = []evmChain{
-	{"eth", "Ethereum", "ETH", 11155111, 12, 3000, "#627EEA", "Ξ"},
-	{"pol", "Polygon", "POL", 80002, 2, 1, "#8247E5", "P"},
-	{"base", "Base", "ETH", 84532, 2, 3000, "#0052FF", "B"},
-	{"bnb", "BNB Chain", "BNB", 97, 3, 600, "#F0B90B", "BNB"},
-	{"avax", "Avalanche", "AVAX", 43113, 2, 30, "#E84142", "A"},
+	{"eth", "Ethereum", "ETH", 11155111, 12, 3000, "#627EEA", "Ξ", "Sepolia", "https://ethereum-sepolia-rpc.publicnode.com", "https://sepolia.etherscan.io", 1},
+	{"pol", "Polygon", "POL", 80002, 2, 1, "#8247E5", "P", "Amoy", "https://polygon-amoy-bor-rpc.publicnode.com", "https://amoy.polygonscan.com", 137},
+	{"base", "Base", "ETH", 84532, 2, 3000, "#0052FF", "B", "Base Sepolia", "https://sepolia.base.org", "https://sepolia.basescan.org", 8453},
+	{"bnb", "BNB Chain", "BNB", 97, 3, 600, "#F0B90B", "BNB", "BNB Chain testnet", "https://bsc-testnet-rpc.publicnode.com", "https://testnet.bscscan.com", 56},
+	{"avax", "Avalanche", "AVAX", 43113, 2, 30, "#E84142", "A", "Fuji", "https://api.avax-test.network/ext/bc/C/rpc", "https://testnet.snowtrace.io", 43114},
 }
 
 func evmByID(id string) (evmChain, bool) {
@@ -143,4 +148,13 @@ func chainOrder(id string) int {
 		}
 	}
 	return 100
+}
+
+// netName is the chain and its public test network in a few words, e.g.
+// "Ethereum Sepolia", "Base Sepolia" or "BNB Chain testnet".
+func (c evmChain) netName() string {
+	if strings.HasPrefix(c.Network, c.Name) || strings.HasPrefix(c.Network, strings.Fields(c.Name)[0]) {
+		return c.Network
+	}
+	return c.Name + " " + c.Network
 }

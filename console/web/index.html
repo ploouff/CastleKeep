@@ -56,6 +56,7 @@ main{display:grid;grid-template-columns:minmax(250px,290px) minmax(0,1fr) minmax
 label{display:block;font-size:13.5px;color:var(--steel);margin-bottom:5px}
 .field{display:flex;gap:8px}
 .field input{flex:1;min-width:0;width:100%;border:1px solid var(--rule);border-radius:6px;padding:7px 10px;background:#fff}
+.field input.over{border-color:#b4442c;box-shadow:0 0 0 1px #b4442c}
 .hint{font-size:13px;color:var(--steel);margin:6px 0 0}
 
 /* vault */
@@ -215,7 +216,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
 <header>
   <div class="brand">
     <h1>Castlekeep <span id="who" style="font-size:.6em;color:var(--steel);font-weight:500"></span></h1>
-    <p>Trade from a vault the exchange can't empty. Running on private test chains.</p>
+    <p>Trade from a vault the exchange can't empty. <span id="where">Running on private test chains.</span></p>
   </div>
   <div class="chain">
     <div class="height"><b id="height">–</b><span id="mempool">Block height</span></div>
@@ -243,8 +244,9 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <div class="figure" id="wallet">–</div>
     <p class="hint" id="walletPending"></p>
     <div id="recvBox" hidden>
-      <p class="hint" style="margin:8px 0 4px">Your signet address. Get free signet coins from a public signet faucet (search "signet faucet") and send them here. They have no value.</p>
+      <p class="hint" style="margin:8px 0 4px" id="recvText">Your signet address. Get free signet coins from a public signet faucet (search "signet faucet") and send them here. They have no value.</p>
       <p class="mono small" id="recvAddr" style="word-break:break-all;background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:6px 8px;margin:0;user-select:all"></p>
+      <p class="small" id="recvLink" style="margin:4px 0 0"></p>
     </div>
     <button class="btn block" id="faucet" style="margin-top:12px">Get 1 test coin</button>
     <div id="bumpBox" hidden style="margin-top:10px">
@@ -410,7 +412,23 @@ const modeText = {
   malicious: "Refuses to settle. If an exit happens it publishes whichever of your signed states pays it most."
 };
 
+// Public networks (Bitcoin signet, the EVM test networks): blocks come by themselves.
+const isPublic = c => !!(c.signet || c.public);
+const blockWait = c => c.signet ? "wait for the next block (about 10 minutes)" : "wait for the next block (a few seconds)";
+// A length of time in words: "1 hour", "24 hours", "30 minutes".
+const durWords = s => s % 3600 === 0 ? (s === 3600 ? "1 hour" : `${s / 3600} hours`) : s % 60 === 0 ? (s === 60 ? "1 minute" : `${s / 60} minutes`) : `${s} seconds`;
+
 function recipes(c) {
+  if (c.public) {
+    const t = c.ticker;
+    return [
+      [`Get test ${t}`, `Copy your address (under Your wallet), get free test ${t} from a faucet for this network, and send them there. Send some to the exchange's address too (on its admin page): it needs them to put the contract on this network, and to lock ${t} when you buy.`],
+      ["A normal trade", `Lock ${c.defaultLock} ${t} and wait a few seconds for the next block. Sell ${c.defaultOrder}, then settle. Your coins come back in the next block.`],
+      ["Buy into the vault", `Ask the exchange to lock some ${t} in your vault, wait a block, add test cash, then buy. You can ask again later for more.`],
+      ["The exchange disappears", "Set the exchange to offline and request an exit. Once the exit window is over (shown on the clock), press the pay-out button. Your watchtower and the exchange's keep running, and everything is saved if you close the programs."],
+      ["See it on the network", "Every transaction is public: the link under your address opens it on the network's block explorer."]
+    ];
+  }
   if (c.signet) return [
     ["Get signet coins", "Copy your signet address (under Your wallet), get coins from a public signet faucet, and press \"Check for coins sent to your address\". Send some to the exchange's address too (on its admin page) if you want to buy."],
     ["A normal trade", "Lock 0.002 and wait for the next block (about 10 minutes). Sell 0.001, then settle. Your coins come back in the next block."],
@@ -510,14 +528,48 @@ function renderAccount() {
   if (S && S.ready && !busy) renderSwap();
 }
 
-// capInput stops an amount box at the most you can use (arrows and typing).
+// capInput stops an amount box at the most you can use. While you're typing
+// in it, the number is left alone (the box is only marked if it's too much);
+// it's brought down to the most you can use when you leave the box.
 function capInput(id, sats) {
   const el = $(id);
   if (!el) return;
-  if (sats == null) { el.removeAttribute("max"); return; } // nothing to go by (no vault yet)
+  if (!el.dataset.capped) {
+    el.dataset.capped = "1";
+    el.addEventListener("blur", () => {
+      const m = parseFloat(el.max);
+      if (el.max !== "" && (parseFloat(el.value) || 0) > m) el.value = String(m);
+      el.classList.remove("over");
+      el.dispatchEvent(new Event("input"));
+    });
+  }
+  if (sats == null) { el.removeAttribute("max"); el.classList.remove("over"); return; } // nothing to go by (no vault yet)
   const max = Math.max(0, Math.floor(sats)) / 1e8;
   el.max = String(max);
-  if ((parseFloat(el.value) || 0) > max) el.value = String(max);
+  const over = (parseFloat(el.value) || 0) > max;
+  if (document.activeElement === el) { el.classList.toggle("over", over); el.title = over ? `The most you can use is ${max}` : ""; return; }
+  el.classList.remove("over"); el.title = "";
+  if (over) el.value = String(max);
+}
+
+// keepTyping redraws a panel without losing what you're typing in it: the
+// panel is only rebuilt when its content changed, and the values, focus and
+// cursor of its boxes are carried over.
+function keepTyping(el, html) {
+  if (el.dataset.h === html) return false;
+  const kept = [...el.querySelectorAll("input[id]")].map(i => {
+    let sel = null;
+    try { sel = [i.selectionStart, i.selectionEnd]; } catch (e) {}
+    return {id: i.id, value: i.value, focus: document.activeElement === i, sel};
+  });
+  el.innerHTML = html; el.dataset.h = html;
+  for (const k of kept) {
+    const i = el.querySelector("#" + k.id);
+    if (!i) continue;
+    i.value = k.value;
+    if (k.focus) { i.focus(); try { if (k.sel && k.sel[0] != null) i.setSelectionRange(k.sel[0], k.sel[1]); } catch (e) {} }
+  }
+  return true;
 }
 // The most you can buy: what the exchange's side holds, and what your cash pays for.
 const buyable = (exchSats, cashCents) => Math.min(exchSats, S.price > 0 ? Math.max(0, cashCents) / 100 / S.price * 1e8 : 0);
@@ -569,9 +621,9 @@ function clockWords(v) {
   const fmtSecs = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min`; };
   if (c.clockUnit === "seconds") {
     return {
-      head: v.clockReady ? "The full 24 hours have passed" : `${fmtSecs(done)} of 24 hours passed`,
+      head: v.clockReady ? `The full ${durWords(total)} have passed`.replace(/full 1 (hour|minute) have/, "full $1 has") : `${fmtSecs(done)} of ${durWords(total)} passed`,
       sub: v.clockReady ? "Anyone can now pay the vault out." : `${fmtSecs(left)} left on the chain's clock.`,
-      foot: "24 hours on the chain's clock"
+      foot: `${durWords(total)} on the chain's clock`
     };
   }
   return {
@@ -584,11 +636,11 @@ function clockWords(v) {
 function renderVault() {
   const el = $("vaultPanel"), v = S.vault, c = S.chain;
   if (!v) {
-    el.innerHTML = `<h2 id="v-h" style="font:600 22px var(--display);margin:0">${coinIcon(c.id, 22)} ${esc(c.name)} vault</h2>
+    keepTyping(el, `<h2 id="v-h" style="font:600 22px var(--display);margin:0">${coinIcon(c.id, 22)} ${esc(c.name)} vault</h2>
       <div class="empty">
         <svg width="56" height="56" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="var(--pine)" stroke-width="1.5"/><path d="M12 8.5v-1M12 16.5v-1M8.5 12h-1M16.5 12h-1" stroke="var(--pine)" stroke-width="1.5"/></svg>
-        <p>No vault open yet. Lock ${esc(c.ticker)} from your wallet to open one, then ${c.signet ? "wait for the next block (about 10 minutes)" : "mine a block"} to confirm the deposit.</p>
-      </div>`;
+        <p>No vault open yet. Lock ${esc(c.ticker)} from your wallet to open one, then ${isPublic(c) ? blockWait(c) : "mine a block"} to confirm the deposit.</p>
+      </div>`);
     return;
   }
   const [cls, label] = statusInfo(v);
@@ -600,8 +652,8 @@ function renderVault() {
   let head = "Not started", sub = c.evm
     ? "Starts when an exit request confirms. Only needed if the exchange stops cooperating."
     : "Starts when an exit request confirms. Only needed if the exchange stops cooperating.";
-  let foot = c.clockUnit === "seconds" ? "24 hours on the chain's clock" : `${v.clockTotal} blocks, about 24 hours`;
-  if (v.exitSent && !v.clockStarted) { head = "Waiting for the exit request to confirm"; sub = "Mine a block to start the clock."; }
+  let foot = c.clockUnit === "seconds" ? `${durWords(v.clockTotal)} on the chain's clock` : `${v.clockTotal} blocks, about 24 hours`;
+  if (v.exitSent && !v.clockStarted) { head = "Waiting for the exit request to confirm"; sub = isPublic(c) ? "The clock starts in the next block." : "Mine a block to start the clock."; }
   if (v.clockStarted) { const w = clockWords(v); head = w.head; sub = w.sub; foot = w.foot; }
   const closeNotes = {
     settled: "Settled with the exchange. Your share went back to your wallet.",
@@ -635,7 +687,7 @@ function renderVault() {
   if (v.sweepKind === "user") sweepNote = `You collected your share of state #${v.publishedState} after the ${v.penaltyDelay}-block wait.`;
   const scripts = (v.scripts || []).map(x => `<p class="small muted" style="margin:10px 0 4px">${esc(x.label)}</p><pre class="mono">${esc(x.text)}</pre>`).join("");
 
-  el.innerHTML = `
+  keepTyping(el, `
     <div class="vault-head">
       <div><h2 id="v-h" style="font:600 22px var(--display);margin:0">${coinIcon(c.id, 22)} ${esc(c.name)} vault</h2>
       <div class="small muted">Locked <span class="num">${coin(v.locked)}</span></div></div>
@@ -668,15 +720,15 @@ function renderVault() {
       <button class="btn" id="claim" ${canClaim ? "" : "disabled"}>${esc(c.claimLabel)}</button>
       ${rev ? `<button class="btn danger" id="cheat" ${canClaim ? "" : "disabled"} title="Publish your copy of an older state that paid you more">Publish an older state yourself</button>` : ""}
     </div>
-    <p class="hint">${v.status === "funding" ? "Mine a block to confirm your deposit before trading." :
+    <p class="hint">${v.status === "funding" ? (isPublic(c) ? "Waiting for the next block to confirm your deposit (or the exchange's) before trading." : "Mine a block to confirm your deposit before trading.") :
       v.status === "open" ? "Settling is instant when the exchange cooperates. Request an exit if it won't." : ""}</p>
     <hr class="divider">
     <h3 style="font:600 16px var(--display);margin:0 0 2px;letter-spacing:.02em">States you've signed</h3>
     <p class="hint" style="margin:0 0 6px">${c.evm ? "Each trade creates a new split that you and the exchange both sign. The highest number always wins." : "Each trade creates a new split that you sign before the order is sent. The highlighted row is the latest."}</p>
     <table class="states"><thead><tr><th>#</th><th>What happened</th><th class="r">Yours</th><th class="r">${exchLabel}</th>${rev ? "<th>Revocation</th>" : ""}</tr></thead><tbody>${rows}</tbody></table>${revNote}
     <details style="margin-top:14px"><summary>${c.evm ? "Show the contract's rules" : "Show the vault's scripts"}</summary>
-      <p class="small muted" style="margin:10px 0 4px">${c.evm ? "Contract and vault" : "Vault address"}</p><pre class="mono">${esc(v.address)}</pre>${scripts}
-    </details>`;
+      <p class="small muted" style="margin:10px 0 4px">${c.evm ? "Contract and vault" : "Vault address"}</p><pre class="mono">${esc(v.address)}</pre>${c.explorer && c.evm ? `<p class="small" style="margin:4px 0 0"><a href="${esc(c.explorer)}/address/${esc(v.address.split(" ")[0])}" target="_blank" rel="noopener">See the contract on the block explorer</a></p>` : ""}${scripts}
+    </details>`);
   const capBtn = $("capBtn");
   if (capBtn) capBtn.onclick = () => act({action: "capacity", sats: Math.round((parseFloat($("capAmt").value) || 0) * 1e8)});
   $("settle").onclick = () => act({action: "settle"});
@@ -688,21 +740,21 @@ function renderVault() {
 function capacityBlock(v, c) {
   if (!c.dualFund) return "";
   const eth = c.evm;
-  if (v.fundPending) {
-    return `<p class="hint" style="margin-top:10px">The exchange's deposit is waiting for a block. Mine one to add the buying capacity.</p>`;
-  }
   const info = v.exchDeposit > 0
-    ? `<p class="hint" style="margin-top:10px">You put in <b>${coin(v.userDeposit)}</b> and the exchange locked <b>${coin(v.exchDeposit)}</b> of buying capacity. You can buy up to <b>${coin(v.exchSats)}</b> more.</p>` : "";
-  // Ethereum's contract takes one deposit per vault; Bitcoin and Litecoin can add more with another splice.
-  if (v.status !== "open" || (eth && v.exchDeposit > 0)) return info;
+    ? `<p class="hint" style="margin-top:10px">You put in <b>${coin(v.userDeposit)}</b> and the exchange has locked <b>${coin(v.exchDeposit)}</b> of buying capacity so far. You can buy up to <b>${coin(v.exchSats)}</b> more.</p>` : "";
+  if (v.status !== "open") return info;
+  // The box stays while the vault is open, so you can ask again (to fix a
+  // too-small amount, or to buy more). Only one request waits for a block at a time.
   const how = eth
-    ? `Ask the exchange to lock its own ${esc(c.ticker)} in your vault so you can buy from it.`
-    : `Ask the exchange to add its own ${esc(c.ticker)} to your vault so you can buy from it. You both sign one transaction that moves the vault and the exchange's coins into a bigger vault.`;
+    ? `Ask the exchange to lock its own ${esc(c.ticker)} in your vault so you can buy from it. You can ask again later for more.`
+    : `Ask the exchange to add its own ${esc(c.ticker)} to your vault so you can buy from it. You both sign one transaction that moves the vault and the exchange's coins into a bigger vault. You can ask again later for more.`;
+  const wait = v.fundPending
+    ? `<p class="hint" style="margin:8px 0 0;color:var(--ink)">The exchange's last deposit is waiting for a block. ${isPublic(c) ? "Once the next block comes" : "Mine one, and once it's in"}, the capacity is added and you can ask for more.</p>` : "";
   return info + `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:#fff">
-      <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 ? "Add more buying capacity" : "Buy more than you sell"}</label>
-      <p class="hint" style="margin:0 0 8px">${how} Fee: 0.2% of the amount, taken from your share.</p>
+      <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 || v.fundPending ? "Add more buying capacity" : "Buy more than you sell"}</label>
+      <p class="hint" style="margin:0 0 8px">${how} Up to 5 ${esc(c.ticker)} per request. Fee: 0.2% of the amount, taken from your share.</p>
       <div class="field"><input id="capAmt" type="number" min="0.001" max="5" step="0.5" value="${esc(c.defaultLock)}" inputmode="decimal" aria-label="Buying capacity in ${esc(c.ticker)}">
-      <button class="btn" id="capBtn">Ask the exchange to lock ${esc(c.ticker)}</button></div>
+      <button class="btn" id="capBtn" ${v.fundPending ? "disabled" : ""}>Ask the exchange to lock ${esc(c.ticker)}</button></div>${wait}
     </div>`;
 }
 
@@ -746,10 +798,14 @@ function renderStatic() {
   lastChain = c.id; selectedTx = null;
   try { localStorage.setItem("ck-chain", c.id); } catch (e) {}
   document.title = `Castlekeep: ${c.name}`;
+  $("where").textContent = isPublic(c) ? "This coin runs on a public test network: real blocks, coins with no value." : "Running on private test chains.";
   $("mineBtns").innerHTML = c.mineButtons.map((b, i) => `<button class="btn" data-mi="${i}" ${b.title ? `title="${esc(b.title)}"` : ""}>${esc(b.label)}</button>`).join("");
   $("mineBtns").querySelectorAll("button").forEach(b => b.onclick = () => { const m = c.mineButtons[+b.dataset.mi]; act({action: "mine", n: m.n || 0, secs: m.secs || 0}); });
   $("recipes").innerHTML = recipes(c).map(([h, p]) => `<div><h4>${esc(h)}</h4><p>${esc(p)}</p></div>`).join("");
-  $("faucet").textContent = c.signet ? "Check for coins sent to your address" : `Get 1 test ${c.ticker}`;
+  $("faucet").textContent = isPublic(c) ? "Check for coins sent to your address" : `Get 1 test ${c.ticker}`;
+  $("recvText").textContent = c.public
+    ? `Your ${c.name} address. Get free test ${c.ticker} from a faucet for this network and send them here. They have no value.`
+    : "Your signet address. Get free signet coins from a public signet faucet (search \"signet faucet\") and send them here. They have no value.";
   $("lock").textContent = `Lock ${c.ticker}`;
   $("lockAmt").value = c.defaultLock; $("orderAmt").value = c.defaultOrder;
   $("orderUnit").textContent = c.ticker;
@@ -794,7 +850,7 @@ function render() {
   }
   renderStatic();
   $("height").textContent = "Block " + S.height.toLocaleString("en-US");
-  $("mempool").textContent = (S.chainTime ? S.chainTime + ". " : "") + (S.mempool ? `${S.mempool} waiting for a block` : "Nothing waiting for a block") + (c.signet ? ". Blocks come by themselves, about every 10 minutes" : "");
+  $("mempool").textContent = (S.chainTime ? S.chainTime + ". " : "") + (S.mempool ? `${S.mempool} waiting for a block` : "Nothing waiting for a block") + (c.signet ? ". Blocks come by themselves, about every 10 minutes" : c.public ? `. Blocks come by themselves, about every ${Math.round(c.blockMinutes * 60)} seconds` : "");
   $("wallet").textContent = coin(S.walletSats);
   $("walletPending").textContent = S.walletPending ? `Plus ${coin(S.walletPending)} waiting for a block` : (c.evm ? "Gas fees come out of this, as on the real network." : "");
   $("bumpBox").hidden = !S.bumpable;
@@ -804,6 +860,8 @@ function render() {
   }
   $("recvBox").hidden = !S.receiveAddr;
   $("recvAddr").textContent = S.receiveAddr || "";
+  $("recvLink").innerHTML = c.explorer && S.receiveAddr
+    ? `<a href="${esc(c.explorer)}/address/${esc(S.receiveAddr)}" target="_blank" rel="noopener">See this address and its transactions on the block explorer</a>` : "";
   $("cash").textContent = usd(S.cashCents / 100);
   $("price").textContent = usd(S.price);
   $("exchWallet").textContent = (S.exchWalletSats > 0 ? "+" : S.exchWalletSats < 0 ? "−" : "") + coin(Math.abs(S.exchWalletSats));

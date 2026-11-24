@@ -164,6 +164,13 @@ func runSplitEVM(t *testing.T, chain string) {
 		if u, e, _, _ := s.w.EthVault(s.chain); u != oneCoin-capacityFee(oneCoin) || e != oneCoin+capacityFee(oneCoin) {
 			t.Fatalf("split after the exchange's deposit: %d / %d", u, e)
 		}
+		// Ask again for more; a second request waits for the first.
+		s.ok(s.w.EthCapacity(s.chain, oneCoin/2))
+		s.refused(s.w.EthCapacity(s.chain, oneCoin/2), "still waiting for a block")
+		s.mine(1)
+		if u, _, _, _ := s.w.EthVault(s.chain); u != oneCoin-capacityFee(oneCoin)-capacityFee(oneCoin/2) {
+			t.Fatalf("your share after a second top-up: %d", u)
+		}
 		for s.x.Cash(s.w.Account) < orderCost(80_000_000, s.x.evm[s.chain].price) {
 			_, err := s.w.AddCash()
 			s.ok(err)
@@ -173,7 +180,7 @@ func runSplitEVM(t *testing.T, chain string) {
 		s.ok(s.w.EthExit(s.chain))
 		s.mine(2) // the exit confirms; the wallet submits its latest state
 		s.finish()
-		s.within("kept the bought ETH", 79_800_000)
+		s.within("kept the bought ETH (less two capacity fees)", 79_800_000-capacityFee(oneCoin/2))
 	})
 
 	t.Run("BadSignaturesRefused", func(t *testing.T) {
