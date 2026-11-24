@@ -66,6 +66,69 @@ func (e *bookEnv) restart(dir string, owner *testing.T) {
 	e.x = x
 }
 
+// keptWhileAway starts the exchange and each wallet once with none of the
+// chains running (as with "chains -coins eth" after using signet), lets them
+// save, then loads that file with the chain running again: the keys, coins and
+// vaults must all still be there, exactly as before.
+func (e *bookEnv) keptWhileAway(dir string) {
+	t := e.t
+	t.Helper()
+	cfgs, rpc := map[string]UTXOConfig{}, map[string]string{}
+	var ee *EthEngine
+	if isEVM(e.chain) {
+		ee = engine(t, e.chain).(*EthEngine)
+	} else {
+		ue := engine(t, e.chain).(*UTXOEngine)
+		cfgs[e.chain], rpc[e.chain] = ue.cfg, ue.RPCAddr()
+	}
+	away := t.TempDir()
+	load := func(x *Exchange, path string) *Exchange {
+		loaded, err := x.Load(path)
+		e.ok(err)
+		if !loaded {
+			t.Fatalf("%s wasn't there", path)
+		}
+		return x
+	}
+	full := func() *Exchange {
+		x, err := NewExchange(cfgs, rpc)
+		e.ok(err)
+		if ee != nil {
+			x.AttachEVM(e.chain, ee.Endpoint(), ee.cfg.DefaultPrice)
+		}
+		return x
+	}
+	bare, err := NewExchange(nil, nil)
+	e.ok(err)
+	load(bare, filepath.Join(dir, "exchange.json")).SaveTo(filepath.Join(away, "exchange.json"))
+	sameRecord(t, "exchange", load(full(), filepath.Join(dir, "exchange.json")).record(),
+		load(full(), filepath.Join(away, "exchange.json")).record())
+
+	for _, name := range []string{"alice", "bob"} {
+		loadW := func(w *Wallet, path string) *Wallet {
+			loaded, err := w.Load(path)
+			e.ok(err)
+			if !loaded {
+				t.Fatalf("%s wasn't there", path)
+			}
+			return w
+		}
+		fullW := func() *Wallet {
+			w, err := NewWallet("http://127.0.0.1:1", cfgs, rpc)
+			e.ok(err)
+			if ee != nil {
+				w.AttachEVM(e.chain, ee.Endpoint())
+			}
+			return w
+		}
+		bareW, err := NewWallet("http://127.0.0.1:1", nil, nil)
+		e.ok(err)
+		loadW(bareW, filepath.Join(dir, name+".json")).SaveTo(filepath.Join(away, name+".json"))
+		sameRecord(t, name, loadW(fullW(), filepath.Join(dir, name+".json")).record(),
+			loadW(fullW(), filepath.Join(away, name+".json")).record())
+	}
+}
+
 // sameRecord checks that what was loaded saves exactly as before.
 func sameRecord(t *testing.T, who string, before, after any) {
 	t.Helper()
@@ -125,6 +188,11 @@ func runSave(t *testing.T, chain string) {
 		e.t = t
 		e.mine()
 		e.restart(dir, root) // a second restart, after the fill, must load cleanly too
+	})
+
+	t.Run("KeptWhileNotRunning", func(t *testing.T) {
+		e.t = t
+		e.keptWhileAway(dir)
 	})
 
 	if isEVM(chain) {

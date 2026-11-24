@@ -69,6 +69,7 @@ type Wallet struct {
 	file, saveErr string
 	lastSaved     []byte
 	seal          *sealKey // password for the file (seal.go); nil: plain text
+	kept          wSave    // saved chains this run doesn't use, written back unchanged
 }
 
 func NewWallet(exchangeURL string, cfgs map[string]UTXOConfig, rpc map[string]string) (*Wallet, error) {
