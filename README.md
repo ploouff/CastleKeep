@@ -148,6 +148,7 @@ This is a proof of concept, not a product.
 - [x] MuSig2 key-path settlements and splices on Bitcoin and Litecoin (new vaults; cheaper and more private)
 - [x] Fee bumping (child pays for parent, anchor outputs on the exit request; separate programs)
 - [x] A separate watchtower program that protects you while your wallet is closed (no keys to your coins)
+- [x] A page a newcomer can follow: a five-step first try, plain-language word list, and test-only buttons behind a "Test tools" switch
 - [ ] Real fee estimation (btcd usually has no estimate; a minimum rate is used)
 - [ ] Lightning-channel version for near-instant deposits and withdrawals
 

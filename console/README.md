@@ -405,17 +405,20 @@ EVM chains. Their coins have no value and come from public faucets.
 
 | Area | What it does |
 | --- | --- |
+| **Start here** | A first try in five steps, ticked off as you go: get test coins, lock them, wait for the deposit to confirm, make a trade, get your coins back. Each step has one button that does it or shows you where. Below it, **What the words mean** explains vault, state, settle, exit window, watchtower and the rest. **Hide this guide** puts it away (the page remembers). |
+| **Test tools** (switch at the top) | Off at first. It shows the tools for trying the safety features: how the exchange behaves (honest, offline, malicious), setting the price, **Have the exchange try to steal**, **Publish an older state yourself**, the exchange's wallet change, and the **Things to try with the test tools** recipes. With it off, the page still says when the exchange has been set to offline or malicious. |
 | **Account bar** | Every coin you hold, the shared cash balance and the total value, on every tab. |
-| **Chain tabs** | Switch between the coins. Each has a small coloured badge (drawn by the page, not the coin's official logo). A green dot means ready. |
-| **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on the EVM chains they mine one block or skip the clock ahead an hour or a day. |
+| **Chain tabs** | Switch between the coins. Each has a small coloured badge (drawn by the page, not the coin's official logo). A green dot means ready. Under them, **How the … vault works, in detail** opens the technical description. |
+| **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on the EVM chains they mine one block or skip the clock ahead an hour or a day. (None on the public test networks: blocks come by themselves.) |
 | **Your wallet** | Test coins only you control. Get more from the faucet, or lock some into a vault. On the EVM chains, gas fees come out of this. |
-| **Vault** | The latest signed split, the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. |
-| **Exchange** | Set the price, sell or buy, swap into another coin, choose how the exchange behaves, and switch your watchtower on or off. |
+| **Vault** | Who owns what now (the latest split you both signed), the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. |
+| **Exchange** | Sell or buy, swap into another coin, and switch your watchtower on or off. |
 | **Activity and Transaction inspector** | Everything that happened, and the exact rule that accepted or refused each transaction. |
 
 ## Things to try
 
-Each tab's "Things to try" box has the steps for that chain. The best comparison:
+Switch on **Test tools** at the top first. Each tab's "Things to try with the test tools" box
+then has the steps for that chain. The best comparison:
 
 1. **Bitcoin tab:** sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit,
    mine twice. The exchange publishes your *older* state, and your watchtower uses that

@@ -21,7 +21,7 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | `console/utxo_vault.go` | Taproot scripts and transaction building for the BTC/LTC vault, states and revocation outputs. |
 | `console/eth.go` | `EthEngine`: JSON-RPC to Hardhat/Anvil, deploys `contract/CastleVault.bin`, signs states. |
 | `console/contract/` | `CastleVault.sol` plus compiled `.bin`/`.abi.json` (the `.bin` is embedded with `go:embed`). |
-| `console/web/index.html` | Single-page UI (embedded). Talks to `/api/chains`, `/api/state?chain=`, `/api/account`, `/api/action`. |
+| `console/web/index.html` | Single-page UI (embedded). Talks to `/api/chains`, `/api/state?chain=`, `/api/account`, `/api/action`. For newcomers: a "Start here" panel (`startSteps`/`renderStart`: five steps ticked off from the snapshot, buttons via `data-step`), a glossary (`glossary(c)`), and a **Test tools** switch (`body.tools`; anything with class `tt` is hidden until it's on: exchange modes, price setting, steal, cheat, recipes). Remembered in localStorage (`ck-tools`, `ck-start-hidden`). Mine buttons stay visible. |
 | `console/scenario_test.go` | Scenario tests that drive each engine through `Do(ActionReq)`. |
 | `console/swap_test.go` | Swap and shared-account tests (need all three chains). |
 | `console/split_core.go`, `split_net.go` | Two-party BTC/LTC vault built from public keys only, chain access, and the messages between the separate programs. |

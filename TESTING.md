@@ -33,6 +33,14 @@ The page opens at `http://127.0.0.1:8080`, with a tab for each coin. Wait for th
 on the tabs. (It starts its own Hardhat node for each EVM chain. Add `-chains btc,ltc,eth` to
 run fewer chains.)
 
+**First visit.** The **Start here** box walks through a first try in five steps (get coins,
+lock, confirm, trade, get your coins back), ticking each off; its buttons do the step or show
+where it is. **Hide this guide** puts it away, and the link under the tabs brings it back.
+
+**Test tools.** The recipes below that make the exchange misbehave, change the price or
+cheat need **Test tools** switched on (top right; the page remembers). With it off, those
+buttons are hidden, and the page says so if the exchange was left offline or malicious.
+
 **Buy new BTC.** On the Bitcoin tab: lock `1`, Mine 1 block. In the vault's "Buy more than
 you sell" box click **Ask the exchange to lock BTC**, Mine 1 block. Click **Add $10,000 test
 cash** six times (0.8 BTC costs $52,000). In the Exchange panel choose **Buy**, enter `0.8`,
@@ -194,7 +202,7 @@ node that behaves like a public network (it mines by itself and can't send for a
    network, and the chains window shows its address.
 5. Send test coins to **your** address and press **Check for coins sent to your address**.
 6. Lock `0.01` and wait a few seconds: the vault opens. Sell `0.005`, then settle.
-7. Exit test: lock again, set the exchange to **Offline**, **Request exit**, wait the hour,
+7. Exit test: lock again, set the exchange to **Offline** (Test tools on, or on its admin page), **Request exit**, wait the hour,
    then press **Pay out after the window**.
 8. The link under your address opens your transactions on the network's block explorer.
 
