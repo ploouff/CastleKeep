@@ -157,6 +157,7 @@ type Snapshot struct {
 	Bumpable    int        `json:"bumpable,omitempty"`    // separate programs: your transactions waiting for a block that can be sped up
 	FeeNote     string     `json:"feeNote,omitempty"`     // separate programs: the node's fee estimate
 	Book        *BookResp  `json:"book,omitempty"`        // separate programs: this coin's order book
+	Tower       string     `json:"tower,omitempty"`       // separate programs: the separate watchtower, in a line
 }
 
 type Engine interface {

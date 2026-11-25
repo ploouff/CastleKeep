@@ -21,7 +21,7 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | `console/utxo_vault.go` | Taproot scripts and transaction building for the BTC/LTC vault, states and revocation outputs. |
 | `console/eth.go` | `EthEngine`: JSON-RPC to Hardhat/Anvil, deploys `contract/CastleVault.bin`, signs states. |
 | `console/contract/` | `CastleVault.sol` plus compiled `.bin`/`.abi.json` (the `.bin` is embedded with `go:embed`). |
-| `console/web/index.html` | Single-page UI (embedded). Talks to `/api/chains`, `/api/state?chain=`, `/api/account`, `/api/action`. |
+| `console/web/index.html` | Single-page UI (embedded). Talks to `/api/chains`, `/api/state?chain=`, `/api/account`, `/api/action`. For newcomers: a "Start here" panel (`startSteps`/`renderStart`: five steps ticked off from the snapshot, buttons via `data-step`), a glossary (`glossary(c)`), and a **Test tools** switch (`body.tools`; anything with class `tt` is hidden until it's on: exchange modes, price setting, steal, cheat, recipes). Remembered in localStorage (`ck-tools`, `ck-start-hidden`). Mine buttons stay visible. |
 | `console/scenario_test.go` | Scenario tests that drive each engine through `Do(ActionReq)`. |
 | `console/swap_test.go` | Swap and shared-account tests (need all three chains). |
 | `console/split_core.go`, `split_net.go` | Two-party BTC/LTC vault built from public keys only, chain access, and the messages between the separate programs. |
@@ -31,6 +31,7 @@ The user runs Windows with Command Prompt and prefers plain, step-by-step explan
 | `console/split_apps.go` | The `chains`, `exchange`, `wallet` subcommands; `walletEngine` adapts the wallet to the page's `Engine` API. |
 | `console/split_eth.go`, `split_apps_eth.go`, `split_eth_test.go` | Ethereum in the separate programs, and its tests. |
 | `console/split_swap.go`, `split_swap_test.go` | Swaps across the three chains in the separate programs. |
+| `console/split_tower.go`, `split_tower_test.go`, `web/tower.html` | Separate watchtower: `go run . watchtower` (:9400, page `web/tower.html`), wallet `-watchtower URL` (saved as `wSave.Tower`; `off` calls `/v1/tower/forget`). Holds no user keys: the wallet sends `TowerUpdate` (BTC/LTC `TowerBreach` = signed penalty sweep per revoked state, `TowerGen` = signed user copy of each generation's newest state if it pays more than the deposit; EVM newest state + both sigs) and the tower's only key is an EVM fee key. Rules: `utxoAgree` calls `towerBefore` (tower gets state n+1 before u_n is revealed; unreachable = trade refused; `Swap` checks first), updates only move forward (`mergeTowerUTXO`), token per wallet (sha256 stored). `Tower.Tick` checks BTC/LTC once per new block. Wallet `watch` recognises the tower's sweep by txid (`penaltySweep`). |
 | `console/split_book.go`, `split_book_test.go` | Order book (separate programs): limit orders, matching (best price, then oldest), reservations, fills each wallet checks against its own order before signing. Page: the "Order book" panel in `index.html` (only shown when the snapshot has `book`), actions `place`/`cancel` via `bookAction`; several wallets with `go run . wallet -name bob -port 9301`. |
 | `console/split_save.go`, `split_save_test.go` | Saving: the exchange (`exchange.json`) and each wallet (`wallet-<name>.json`) save only inputs (keys, amounts, signatures, secrets, some tx hex) after every request/tick and rebuild scripts and txs on `Load`. Half-done steps (`pend`) are dropped. Chains not running this time stay in the file unchanged (`x.kept`/`w.kept`, `notRunning`). Files are refused if made on another chain (`chainConn.tag` = hash of block 1). Kept chains: `keepChain`, `keepBlocks`/`replayBlocks`, `miner.json`, `eth.json` (kept contract). Flags `-data`, `-fresh` (renames old data, never deletes). Default folder `%USERPROFILE%\castlekeep-data`. |
 | `console/split_signet.go` | Bitcoin signet: `go run . chains -network signet` (Bitcoin only; btcd with `--signet --addrindex`, data in `castlekeep-data\chains-signet`). No mining or faucet; exchange and wallets find coins sent to their addresses with `searchrawtransactions` (`coinsTo`, every 15 s, or the page's "Check for coins" button). |
@@ -98,7 +99,7 @@ an order gets the exchange's signature on the user's copy first, then the user s
 reveals u_{n-1}, then the exchange reveals r_{n-1}; a splice only swaps the old state's
 secrets after it confirms (`/v1/capacity/finish`). Run as `go run . chains` (nodes, faucet,
 mine on :9100), `go run . exchange` (:9200, admin page `web/exchange.html`) and
-`go run . wallet` (:9300, the usual page via `walletEngine` in `split_apps.go`). ETH is in `split_eth.go` (exchange proposes a
+`go run . wallet` (:9300, the usual page via `walletEngine` in `split_apps.go`), plus optionally `go run . watchtower` (:9400, `split_tower.go`). ETH is in `split_eth.go` (exchange proposes a
 split, wallet signs, exchange signs; settle signature only for the latest state, after
 which the exchange stops trading on that vault; same rule on BTC/LTC). Swaps: `split_swap.go` (`/v1/swap` prepares
 both sides, signs the buying side first and takes its price from cash; the wallet checks

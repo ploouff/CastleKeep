@@ -70,6 +70,13 @@ type Wallet struct {
 	lastSaved     []byte
 	seal          *sealKey // password for the file (seal.go); nil: plain text
 	kept          wSave    // saved chains this run doesn't use, written back unchanged
+
+	// a separate watchtower program (split_tower.go); tower and towerToken are saved
+	tower, towerToken string
+	towerSent         string // towerPrint of the last update it accepted
+	towerErr          string
+	towerAt           time.Time
+	towerStat         *TowerStatus
 }
 
 func NewWallet(exchangeURL string, cfgs map[string]UTXOConfig, rpc map[string]string) (*Wallet, error) {
@@ -297,6 +304,13 @@ func (w *Wallet) utxoAgree(v *wVault, off StateOffer, want int64, us, uh []byte)
 	}
 	st.exchSigU, st.uSecret = off.ExchSigU, us
 	st.userSigE = signLeaf(st.etx, 0, v.def.eFetch(g), v.def.ms, v.key)
+	// A separate watchtower must hold the new state before we hand over our
+	// secret for the old one. Otherwise, after an exit, it could still publish
+	// the old state for us, and the exchange would take our share with that
+	// secret. If it can't be reached, stop here: nothing has been given up.
+	if err := w.towerBefore(v, st); err != nil {
+		return userErr("Your watchtower couldn't be reached, so the trade was stopped before anything was handed over. Start it again and retry. (%v)", err)
+	}
 	var cr CommitResp
 	if err := call(w.base, "/v1/order/commit", CommitReq{v.id, st.Index, st.userSigE, l.uSecret}, &cr); err != nil {
 		return err
@@ -311,6 +325,7 @@ func (w *Wallet) utxoAgree(v *wVault, off StateOffer, want int64, us, uh []byte)
 	}
 	l.rSecret, l.revoked = cr.RSecretPrev, true
 	v.log("State #%d: %s", st.Index, st.Label)
+	w.towerSend(true) // the penalty sweep for the old state (retried on the next tick if this fails)
 	return nil
 }
 
@@ -589,6 +604,7 @@ func (w *Wallet) Tick() {
 			w.signFills(c)
 		}
 	}
+	w.towerSend(false)
 	w.save()
 }
 
@@ -610,6 +626,10 @@ func (w *Wallet) watch(wc *wChain, v *wVault) {
 					v.log("The exchange published state #%d", s.Index)
 				}
 				if c.isSeen(s.utx) {
+					if v.closeTx == nil && w.tower != "" {
+						// Only our own copy, signed by us: this wallet didn't send it, so the watchtower did.
+						v.log("Your separate watchtower published your latest state #%d", s.Index)
+					}
 					v.published, v.publishedBy, v.closed = s, "user", "published"
 					v.closeTx = s.utx
 				}
@@ -627,7 +647,7 @@ func (w *Wallet) watch(wc *wChain, v *wVault) {
 				}
 			}
 			if l != nil && l.UserSats > g.userDep {
-				tx := withBoth(l.utx, v.def.E, v.def.ms, signLeaf(l.utx, 0, v.def.eFetch(g), v.def.ms, v.key), l.exchSigU)
+				tx := v.userCopy(g, l)
 				if c.send(tx) == nil {
 					v.published, v.publishedBy, v.closed = l, "user", "published"
 					v.closeTx = tx
@@ -636,12 +656,26 @@ func (w *Wallet) watch(wc *wChain, v *wVault) {
 			}
 			break
 		}
-		return
+		if v.closed == "" {
+			return
+		}
+		// Just found a published state: look at what followed it straight
+		// away (a wallet coming back may find the penalty sweep already done).
 	}
 	if v.closed != "published" || v.sweepKind != "" {
 		return
 	}
 	s := v.published
+	// The penalty sweep may already be on the chain, sent by a separate
+	// watchtower while this wallet was closed (same txid as our own).
+	if v.publishedBy == "exchange" && s.revoked && s.rSecret != nil && s.rIdx >= 0 {
+		if sw := v.penaltySweep(s); c.isSeen(sw) {
+			wc.learn(sw)
+			v.sweepKind = "penalty"
+			v.log("Penalty sweep: the exchange's share of old state #%d is yours (sent by your separate watchtower)", s.Index)
+			return
+		}
+	}
 	// Notice when the exchange took a delayed share (ours with our secret,
 	// or its own after D2), so the page can say what happened.
 	if v.publishedBy == "user" && s.uIdx >= 0 && c.confs(s.utx) > 0 {
@@ -660,7 +694,7 @@ func (w *Wallet) watch(wc *wChain, v *wVault) {
 	}
 	if v.publishedBy == "exchange" && w.WT && s.revoked && s.rIdx >= 0 && c.confs(s.etx) > 0 {
 		if _, ok := c.unspent(s.rOut()); ok {
-			tx := spendLeaf(s.rOut(), s.rAmt, s.R.out, s.R.rev, 0, v.key, v.def.userPay, s.rSecret)
+			tx := v.penaltySweep(s)
 			if c.send(tx) == nil {
 				wc.learn(tx)
 				v.sweepKind = "penalty"

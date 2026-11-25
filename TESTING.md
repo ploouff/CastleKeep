@@ -33,6 +33,14 @@ The page opens at `http://127.0.0.1:8080`, with a tab for each coin. Wait for th
 on the tabs. (It starts its own Hardhat node for each EVM chain. Add `-chains btc,ltc,eth` to
 run fewer chains.)
 
+**First visit.** The **Start here** box walks through a first try in five steps (get coins,
+lock, confirm, trade, get your coins back), ticking each off; its buttons do the step or show
+where it is. **Hide this guide** puts it away, and the link under the tabs brings it back.
+
+**Test tools.** The recipes below that make the exchange misbehave, change the price or
+cheat need **Test tools** switched on (top right; the page remembers). With it off, those
+buttons are hidden, and the page says so if the exchange was left offline or malicious.
+
 **Buy new BTC.** On the Bitcoin tab: lock `1`, Mine 1 block. In the vault's "Buy more than
 you sell" box click **Ask the exchange to lock BTC**, Mine 1 block. Click **Add $10,000 test
 cash** six times (0.8 BTC costs $52,000). In the Exchange panel choose **Buy**, enter `0.8`,
@@ -194,7 +202,7 @@ node that behaves like a public network (it mines by itself and can't send for a
    network, and the chains window shows its address.
 5. Send test coins to **your** address and press **Check for coins sent to your address**.
 6. Lock `0.01` and wait a few seconds: the vault opens. Sell `0.005`, then settle.
-7. Exit test: lock again, set the exchange to **Offline**, **Request exit**, wait the hour,
+7. Exit test: lock again, set the exchange to **Offline** (Test tools on, or on its admin page), **Request exit**, wait the hour,
    then press **Pay out after the window**.
 8. The link under your address opens your transactions on the network's block explorer.
 
@@ -211,6 +219,33 @@ signing is saved, and that vaults opened without MuSig2 still use the script. By
    Transaction inspector says "Key path: one MuSig2 signature…".
 3. Under **Show the vault's scripts**, the first entry is the combined key; the scripts below
    it are the hidden backup paths.
+
+## J. The separate watchtower (while your wallet is closed)
+
+`go test -run Tower -v` checks the following on Bitcoin, Litecoin, Ethereum and Base:
+- With the wallet closed, the watchtower takes the exchange's share when the exchange
+  publishes an old state.
+- It publishes your newest state when an exit confirms and nobody else does.
+- On the EVM chains, it submits your newest state over an old one the exchange submitted.
+- It keeps working after a restart from its file.
+- A trade is stopped, with nothing handed over, while the watchtower can't be reached.
+- It never goes back to an older state, and it refuses another wallet's token.
+
+By hand:
+
+1. Start the chains and the exchange as in C. In a third window: `go run . watchtower`. Its page
+   opens at `http://127.0.0.1:9400`.
+2. Fourth window: `go run . wallet -name alice -watchtower http://127.0.0.1:9400`. Under
+   **Your watchtower is on**, the wallet page now has a line about the separate watchtower.
+3. On the Bitcoin tab: lock `1`, Mine 1 block, sell `0.5`, buy `0.5` back. The watchtower's page
+   shows the vault with 1 penalty sweep ready.
+4. Switch **Your watchtower is off** (as if your wallet were closed) and set the exchange to
+   **Malicious** on the admin page.
+5. **Request exit**, then Mine 1 block: the exchange publishes your old state. Wait a few
+   seconds and Mine 1 block again: the watchtower's page says it sent the penalty sweep. Mine
+   once more: your wallet shows the penalty sweep, and you get the whole vault.
+6. Close the watchtower window, then try to sell: the trade is stopped with "Your watchtower
+   couldn't be reached", and nothing was handed over. Start the watchtower again to carry on.
 
 ## What a failure looks like
 

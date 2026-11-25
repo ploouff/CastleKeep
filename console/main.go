@@ -66,7 +66,7 @@ func openBrowser(url string) {
 }
 
 func main() {
-	// The separate programs: go run . chains | exchange | wallet
+	// The separate programs: go run . chains | exchange | wallet | watchtower
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "chains":
@@ -77,6 +77,9 @@ func main() {
 			return
 		case "wallet":
 			runWallet(os.Args[2:])
+			return
+		case "watchtower":
+			runWatchtower(os.Args[2:])
 			return
 		}
 	}

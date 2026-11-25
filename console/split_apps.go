@@ -499,6 +499,77 @@ func runExchange(args []string) {
 	http.Serve(ln, m)
 }
 
+// ------------------------------------------------------------------ watchtower
+
+//go:embed web/tower.html
+var towerFS embed.FS
+
+func runWatchtower(args []string) {
+	fs := flag.NewFlagSet("watchtower", flag.ExitOnError)
+	port := fs.Int("port", 9400, "port for the watchtower and its page")
+	chains := fs.String("chains", "http://127.0.0.1:9100", "the chains service")
+	noBrowser := fs.Bool("no-browser", false, "don't open its page")
+	data := fs.String("data", DataDir(), "folder for the watchtower's saved data (watchtower.json)")
+	fresh := fs.Bool("fresh", false, "start a new watchtower (the old file is renamed, not deleted)")
+	fs.Parse(args)
+
+	cfgs, rpc, eps := waitChains(*chains)
+	t, err := NewTower(cfgs, rpc)
+	if err != nil {
+		fmt.Println("Couldn't connect to the test nodes:", err)
+		os.Exit(1)
+	}
+	for _, c := range evmChains {
+		if ep := eps[c.ID]; ep != nil {
+			t.AttachEVM(c.ID, *ep)
+		}
+	}
+	file := filepath.Join(*data, "watchtower.json")
+	startFile(file, *fresh, t.Load)
+	t.SaveTo(file)
+	// Its own coins, only to pay gas when it submits a state on an EVM chain.
+	for _, c := range evmChains {
+		te := t.evm[c.ID]
+		if te == nil {
+			continue
+		}
+		if te.public {
+			fmt.Printf("%s: send a little test %s (0.01 is plenty) to the watchtower's fee address %s, from a faucet for %s. It pays the gas when it submits a state for you.\n",
+				c.netName(), c.Ticker, t.FeeAddress(), c.Network)
+			continue
+		}
+		if fromWei(te.c.balance(t.FeeAddress())) >= towerFeeMin {
+			continue // funded on an earlier run
+		}
+		if err := call(*chains, "/faucet", FaucetReq{Chain: c.ID, Addr: t.FeeAddress(), Sats: unit}, nil); err != nil {
+			fmt.Printf("Couldn't get test %s for its fees: %v\n", c.Ticker, err)
+		}
+	}
+	go func() {
+		for range time.Tick(3 * time.Second) {
+			t.Tick()
+		}
+	}()
+	m := http.NewServeMux()
+	m.Handle("/v1/", t.Handler())
+	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := towerFS.ReadFile("web/tower.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(b)
+	})
+	ln, url := listen(*port)
+	fmt.Println("Castlekeep watchtower (test networks only)")
+	fmt.Println("It holds no keys to your coins: only transactions your wallet signed in advance, which pay you.")
+	fmt.Println("Saved in:", file)
+	fmt.Println("Its page:", url)
+	fmt.Println("Next, start your wallet with it (once is enough; the wallet remembers):")
+	fmt.Println("  go run . wallet -name alice -watchtower", url)
+	if !*noBrowser {
+		openBrowser(url)
+	}
+	http.Serve(ln, m)
+}
+
 // ------------------------------------------------------------------ wallet
 
 func runWallet(args []string) {
@@ -512,6 +583,7 @@ func runWallet(args []string) {
 	fresh := fs.Bool("fresh", false, "start a new wallet with new keys (the old file is renamed, not deleted)")
 	protect := fs.Bool("password", false, "protect the saved file with a password (asked for at start)")
 	unprotect := fs.Bool("remove-password", false, "save the file in plain text again")
+	towerURL := fs.String("watchtower", "", "a separate watchtower to keep up to date, e.g. http://127.0.0.1:9400 (remembered; \"off\" to stop using it)")
 	fs.Parse(args)
 	if !validName(*name) {
 		fmt.Println("Use only letters, digits, - and _ in -name.")
@@ -538,6 +610,22 @@ func runWallet(args []string) {
 		w.SetName(*name)
 	}
 	w.SaveTo(file)
+	switch *towerURL {
+	case "":
+		// keep whatever the saved file says
+	case "off":
+		if err := w.StopTower(); err != nil {
+			fmt.Println("Couldn't tell the watchtower to forget this wallet, so it's still in use:", err)
+			fmt.Println("Start the watchtower, then try again. (Otherwise it would keep a state your next trades replace.)")
+			os.Exit(1)
+		}
+		fmt.Println("Stopped using the separate watchtower; it no longer holds anything for this wallet.")
+	default:
+		w.UseTower(*towerURL)
+	}
+	if u := w.TowerURL(); u != "" {
+		fmt.Println("Separate watchtower:", u, "(it gets each new state before the old one is given up; -watchtower off to stop)")
+	}
 	var engines []Engine
 	for _, id := range []string{"btc", "ltc"} {
 		if _, ok := cfgs[id]; !ok {
@@ -739,6 +827,7 @@ func (e *walletEngine) Snapshot() Snapshot {
 	}
 	e.w.mu.Lock()
 	defer e.w.mu.Unlock()
+	s.Tower = e.w.towerNote(e.id)
 	wc := e.w.chains[e.id]
 	s.Height = wc.c.height()
 	s.Bumpable, s.FeeNote = len(wc.bumpable()), wc.c.feeNote()

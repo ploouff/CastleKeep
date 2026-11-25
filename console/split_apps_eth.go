@@ -171,6 +171,7 @@ func (e *walletEthEngine) Snapshot() Snapshot {
 	s.Who, s.Book = e.w.Name, e.w.bookSnapshot(e.id)
 	e.w.mu.Lock()
 	defer e.w.mu.Unlock()
+	s.Tower = e.w.towerNote(e.id)
 	we := e.w.evm[e.id]
 	c := we.c
 	s.Height = c.height()

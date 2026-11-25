@@ -153,6 +153,34 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 .recipes h4{margin:0 0 4px;font-size:14.5px}
 .recipes p{margin:0;font-size:13.5px;color:var(--steel)}
 
+/* getting started */
+.start{margin:22px 28px 0;background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:16px 20px}
+.start-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.start h2{font:600 20px/1.2 var(--display);margin:0;letter-spacing:.02em}
+.start .intro{margin:6px 0 14px;color:var(--steel);font-size:14px;max-width:95ch}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.steps li{border:1px solid var(--rule-soft);border-radius:8px;padding:10px 12px 12px;background:#fff}
+.steps li.now{border-color:var(--pine);box-shadow:0 0 0 1px var(--pine)}
+.steps h3{font:600 15px/1.25 var(--display);margin:0 0 4px;display:flex;align-items:center;gap:8px;letter-spacing:.01em}
+.steps .n{flex:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--rule-soft);font:600 12.5px var(--display)}
+.steps li.done .n{background:var(--pine);color:#fff}
+.steps li.done h3{color:var(--steel)}
+.steps p{margin:0;font-size:13px;color:var(--steel)}
+.steps .btn{margin-top:9px}
+.start-done{margin:14px 0 0;font-size:14px;padding:10px 12px;background:var(--pine-tint);border-radius:8px}
+.gloss{margin-top:14px}
+.gloss dl{display:grid;grid-template-columns:minmax(110px,max-content) 1fr;gap:7px 16px;font-size:13.5px;margin:10px 0 4px}
+.gloss dt{font-weight:600}
+.gloss dd{margin:0;color:var(--steel)}
+.reopen{margin:12px 28px 0}
+.flash{animation:flash 1.8s ease-out}
+@keyframes flash{0%,45%{box-shadow:0 0 0 3px var(--amber)}100%{box-shadow:0 0 0 0 rgba(173,114,16,0)}}
+/* test tools: hidden until switched on at the top */
+body:not(.tools) .tt{display:none!important}
+.tools-switch{font-size:13.5px;color:var(--steel);white-space:nowrap}
+details.model summary{font-size:13.5px}
+details.model p{margin:6px 0 0}
+
 /* overlay + toast */
 .overlay{display:flex;align-items:center;justify-content:center;padding:80px 24px;min-height:60vh}
 .overlay .box{max-width:460px}
@@ -178,7 +206,8 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
   .mine{flex-wrap:wrap}
   .mine .btn{flex:1 1 auto}
   .lower{padding:0 16px 32px}
-  .guide{margin:16px 16px 0}
+  .guide,.start{margin:16px 16px 0}
+  .reopen{margin:12px 16px 0}
   .ticks{grid-template-columns:repeat(48,1fr)}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -221,19 +250,30 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
   <div class="chain">
     <div class="height"><b id="height">–</b><span id="mempool">Block height</span></div>
     <div class="mine" role="group" aria-label="Move the chain forward" id="mineBtns"></div>
+    <label class="switch tools-switch" title="Make the exchange go offline or cheat, change prices, and more, to see how the vault protects you"><input type="checkbox" id="toolsOn"> Test tools</label>
   </div>
 </header>
 <section class="acct" id="acct" aria-label="Your test account across every coin"></section>
 <nav class="tabs" role="tablist" aria-label="Choose a blockchain" id="tabs"></nav>
-<p class="model" id="model"></p>
+<details class="model" id="modelBox"><summary id="modelSum">How this vault works, in detail</summary><p id="model"></p></details>
 
 <section class="overlay" id="overlay" hidden>
   <div class="box" id="overlayBox"></div>
 </section>
 
 <div id="app" hidden>
-<details class="guide" id="guide" open>
-  <summary>Things to try</summary>
+<section class="start" id="start" aria-labelledby="s-h">
+  <div class="start-head"><h2 id="s-h">Start here</h2><button class="link" id="startHide">Hide this guide</button></div>
+  <p class="intro">Castlekeep lets you trade on an exchange while your coins stay in a vault that needs your signature to move.
+  If the exchange disappears or cheats, you can still take your coins back on your own after a waiting period.
+  Everything here uses test coins with no value.</p>
+  <ol class="steps" id="steps"></ol>
+  <p class="start-done" id="startDone" hidden></p>
+  <details class="gloss"><summary>What the words mean</summary><dl id="gloss"></dl></details>
+</section>
+<p class="reopen small" id="startShow" hidden><button class="link" id="startShowBtn">Show the getting-started guide</button></p>
+<details class="guide tt" id="guide" open>
+  <summary>Things to try with the test tools</summary>
   <div class="recipes" id="recipes"></div>
 </details>
 
@@ -255,7 +295,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     </div>
     <hr class="divider">
     <label for="lockAmt">Lock into a new vault</label>
-    <div class="field">
+    <div class="field" id="lockBox">
       <input id="lockAmt" type="number" min="0.001" step="0.1" value="1" inputmode="decimal" aria-describedby="lockHint">
       <button class="btn primary" id="lock">Lock</button>
     </div>
@@ -274,12 +314,15 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <p class="sub">The order book and the other key holder.</p>
     <label for="priceInput" id="priceLabel">Price (USD)</label>
     <div class="price"><span class="figure" id="price">–</span></div>
-    <div class="field" style="margin-top:8px" id="priceSteps"></div>
-    <div class="field" style="margin-top:8px">
-      <input id="priceInput" type="number" min="1" step="1" placeholder="New price" aria-label="New price in dollars">
-      <button class="btn" id="setPrice">Set price</button>
+    <div class="tt">
+      <div class="field" style="margin-top:8px" id="priceSteps"></div>
+      <div class="field" style="margin-top:8px">
+        <input id="priceInput" type="number" min="1" step="1" placeholder="New price" aria-label="New price in dollars">
+        <button class="btn" id="setPrice">Set price</button>
+      </div>
     </div>
     <hr class="divider">
+    <div id="orderBox">
     <label>Place an order</label>
     <div class="seg" role="group" aria-label="Order side">
       <button aria-pressed="true" data-side="sell">Sell</button>
@@ -292,6 +335,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <p class="hint" id="orderEst"></p>
     <button class="btn primary block" id="order" style="margin-top:10px">Sign and sell</button>
     <p class="hint" id="orderHint"></p>
+    </div>
     <hr class="divider">
     <label for="swapTo">Swap into another coin</label>
     <p class="hint" style="margin:0 0 8px">One order: sell <span id="swapFrom"></span> from this vault and buy another coin with the money, at the prices shown. No cash is used.</p>
@@ -304,20 +348,26 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <button class="btn primary block" id="swap" style="margin-top:10px">Sign and swap</button>
     <p class="hint" id="swapHint">The exchange signs the new state for the coin you buy first. Only then do you sign the sale, so you never give up one coin without already holding the other.</p>
     <hr class="divider">
-    <label>How the exchange behaves</label>
-    <div class="seg" role="group" aria-label="Exchange behaviour" id="modes">
-      <button data-mode="honest">Honest</button>
-      <button data-mode="offline">Offline</button>
-      <button data-mode="malicious">Malicious</button>
+    <div class="tt">
+      <label>How the exchange behaves <span class="small">(test tool)</span></label>
+      <div class="seg" role="group" aria-label="Exchange behaviour" id="modes">
+        <button data-mode="honest">Honest</button>
+        <button data-mode="offline">Offline</button>
+        <button data-mode="malicious">Malicious</button>
+      </div>
+      <p class="mode-desc" id="modeDesc"></p>
     </div>
-    <p class="mode-desc" id="modeDesc"></p>
+    <p class="hint" id="modeNote" hidden></p>
     <div id="wtBox" hidden>
-      <label class="switch"><input type="checkbox" id="wt"> Your watchtower is on</label>
+      <label class="switch"><input type="checkbox" id="wt"> <span id="wtLabel">Your watchtower is on</span></label>
       <p class="hint" id="wtHint">It watches exits for you and submits your newest signed state if an older one shows up.</p>
+      <p class="hint" id="towerNote" hidden></p>
     </div>
-    <button class="btn danger block" id="steal" style="margin-top:12px">Have the exchange try to steal</button>
-    <hr class="divider">
-    <p class="small muted" style="margin:0">Exchange wallet change since the start: <span class="num" id="exchWallet">0</span></p>
+    <div class="tt">
+      <button class="btn danger block" id="steal" style="margin-top:12px">Have the exchange try to steal</button>
+      <hr class="divider">
+      <p class="small muted" style="margin:0">Exchange wallet change since the start: <span class="num" id="exchWallet">0</span></p>
+    </div>
   </section>
 </main>
 
@@ -451,6 +501,101 @@ function recipes(c) {
       ? `Open a vault on Bitcoin too. Here, lock 1 ${t}, ask the exchange to lock 1 ${t}, and mine a block. On the Bitcoin tab, swap 0.04 BTC into ${t}: both vaults get a new state, and the account bar at the top shows the result.`
       : `Lock 1 ${t} here. On Ethereum, lock 1 ETH, ask the exchange to lock 1 ETH and mine a block. Back here, swap 0.04 ${t} into ETH. Once the exchange has locked some ${t} here too, you can also swap other coins into new ${t}.`]
   ].concat(c.dualFund ? [["Buy new " + t, `Lock 1 ${t} and mine a block. Ask the exchange to lock 1 ${t}, mine a block, add enough test cash, then buy 0.8 ${t}. Settle and mine: your wallet gets about 1.8 ${t}.`]] : []);
+}
+
+// ---------------------------------------------------------------- getting started
+
+// Two choices the page remembers: test tools shown, and the guide hidden.
+const remember = (k, v) => { try { localStorage.setItem(k, v ? "1" : "0"); } catch (e) {} };
+const recall = k => { try { return localStorage.getItem(k) === "1"; } catch (e) { return false; } };
+let tools = recall("ck-tools"), startHidden = recall("ck-start-hidden");
+function setTools(on) {
+  tools = on; remember("ck-tools", on);
+  document.body.classList.toggle("tools", on);
+  $("toolsOn").checked = on;
+}
+
+// The words a newcomer meets on this page, in plain language.
+function glossary(c) {
+  const t = c.ticker, rev = !c.evm;
+  return [
+    ["Vault", "Coins locked so that moving them needs two signatures: yours and the exchange's. Neither of you can take them alone."],
+    ["State", "A signed note of who owns what inside the vault. Every trade makes a new one that you both sign; the newest one counts."],
+    ["Settle", "Closing the vault together with the exchange. Your share comes straight back to your wallet."],
+    ["Exit and exit window", "What you do if the exchange stops answering. After you request an exit there's a waiting period, the exit window, shown on the exit clock. During it the exchange can only answer with a state you both signed; after it, you can take your coins on your own."],
+    ["Watchtower", rev
+      ? "A helper that watches the chain for you. If the exchange publishes an old state, it uses that state's revocation secret to take the exchange's share. It runs inside your wallet, and can also run as its own program so it keeps watching while your wallet is closed."
+      : "A helper that watches the contract for you during an exit and submits your newest state if an older one shows up."],
+    rev ? ["Revocation secret", "When a newer state is signed, the exchange hands you a secret for the one it replaces. If it ever publishes that old state, the secret lets you take its share. You hand it yours too, so neither side can go back to an old state."] : null,
+    c.dualFund ? ["Buying capacity", `${t} the exchange locks into your vault, so you can buy more than you put in. It costs a 0.2% fee.`] : null,
+    ["Block", isPublic(c)
+      ? "Transactions count once they're in a block. On this public test network blocks come by themselves."
+      : "Transactions count once they're in a block. On these private test chains you make blocks yourself with the Mine buttons at the top."],
+    ["Test coins and faucets", "Coins with no value, only for testing. A faucet is a website that gives them away."],
+    ["Cash on the exchange", "Pretend dollars for testing. The exchange holds them like any normal account; only the coins are in your vault."],
+    ["Test tools", "The switch at the top. It shows buttons that make the exchange go offline or cheat, change the price, and more, so you can see how the vault protects you."]
+  ].filter(Boolean);
+}
+
+// The five steps of a first try, each ticked off from what the page shows.
+function startSteps() {
+  const c = S.chain, v = S.vault, t = c.ticker, pub = isPublic(c);
+  const closedV = !!v && (v.status === "closed" || v.status === "closing");
+  const mine1 = !pub && c.mineButtons.length ? c.mineButtons[0] : null;
+  // The usual amount, or a round amount that leaves room for the fee.
+  const def = parseFloat(c.defaultLock) || 0, spare = (S.walletSats - (c.evm ? 1e6 : 3000)) / 1e8;
+  let lockable = spare >= def ? def : Math.floor(spare * 100) / 100;
+  if (lockable <= 0 && spare > 0) lockable = Math.floor(spare * 1e4) / 1e4;
+  const lockBtn = lockable > 0 ? ["lock:" + lockable, `Lock ${lockable} ${t}`]
+    : S.walletPending > 0 && mine1 ? ["mine", mine1.label] : ["show:lockBox", "Show me"];
+  return [
+    {done: S.walletSats + S.walletPending > 0 || !!v, title: `Get some test ${t}`,
+     text: !pub ? "Free coins on this private test chain. They have no value."
+       : c.signet ? `Copy your signet address under Your wallet, get free coins from a signet faucet (search "signet faucet"), then press the button. They have no value.`
+       : `Copy your ${c.name} address under Your wallet, get free test ${t} from a faucet for this network, then press the button. They have no value.`,
+     btn: pub ? ["faucet", "Check for coins"] : ["faucet", `Get 1 test ${t}`]},
+    {done: !!v, title: `Lock ${t} in a vault`,
+     text: "Moving it then needs your key and the exchange's, so neither of you can take it alone. You can always get it back, even without the exchange."
+       + (S.walletSats === 0 && S.walletPending > 0 ? " Your coins are on their way: they need a block first." : ""),
+     btn: lockBtn},
+    {done: !!v && v.status !== "funding", title: "Wait for the deposit to confirm",
+     text: pub ? `It counts once it's in a block: ${blockWait(c)}.` : "On a private test chain you make the next block yourself.",
+     btn: mine1 ? ["mine", mine1.label] : null},
+    {done: !!v && (v.states.length > 1 || closedV), title: "Make a trade",
+     text: `Sell some ${t} for test dollars in the Exchange panel. ` + (c.evm
+       ? "You and the exchange both sign the new split, and a newer one always replaces an older one."
+       : "You sign the new split before the order goes out, so a filled trade can't be undone."),
+     btn: ["show:orderBox", "Show me"]},
+    {done: closedV, title: "Get your coins back",
+     text: `Settle with the exchange: you both sign and your share comes back ${pub ? "in the next block" : "once you mine a block"}. If the exchange ever stops answering, request an exit instead: after the exit window you take your coins without it.`,
+     btn: ["show:vaultActions", "Show me"]}
+  ];
+}
+
+function renderStart() {
+  $("start").hidden = startHidden;
+  $("startShow").hidden = !startHidden;
+  if (startHidden) return;
+  const steps = startSteps(), now = steps.findIndex(s => !s.done);
+  setHTML("steps", steps.map((s, i) => `<li class="${s.done ? "done" : i === now ? "now" : ""}">
+    <h3><span class="n">${s.done ? "✓" : i + 1}</span>${esc(s.title)}</h3>
+    ${s.done ? "" : `<p>${esc(s.text)}</p>`}
+    ${!s.done && i === now && s.btn ? `<button class="btn ${s.btn[0].startsWith("show:") ? "" : "primary"}" data-step="${esc(s.btn[0])}">${esc(s.btn[1])}</button>` : ""}</li>`).join(""));
+  const done = now < 0;
+  $("startDone").hidden = !done;
+  if (done) {
+    setHTML("startDone", `That's the whole cycle: coins in, a trade, coins out. Next, see what happens when the exchange misbehaves:
+      ${tools ? "try the recipes under <b>Things to try with the test tools</b>." : "switch on <b>Test tools</b> at the top right, then try the recipes that appear."}
+      To go round again, lock some more ${esc(S.chain.ticker)}.`);
+  }
+}
+
+// showMe scrolls to a part of the page and makes it blink once.
+function showMe(id) {
+  let el = $(id);
+  if (!el) return;
+  el.scrollIntoView({behavior: "smooth", block: "center"});
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 }
 
 function toast(msg, isErr) {
@@ -699,7 +844,7 @@ function renderVault() {
     </div>
     <p class="keys-note">Both keys must sign to move these coins. The only exception is the exit window, which protects you if the exchange stops cooperating.</p>
     ${closed && closeNotes[v.closeKind] ? `<p class="small" style="margin:-6px 0 14px;color:var(--slate)">${closeNotes[v.closeKind]}${sweepNote ? " " + esc(sweepNote) : ""}</p>` : ""}
-    <div class="split-top"><span class="small muted">Latest signed split</span></div>
+    <div class="split-top"><span class="small muted">Who owns what now (the latest split you both signed)</span></div>
     <div class="bar" role="img" aria-label="Yours ${coin(v.userSats)}, ${exchLabel.toLowerCase()} ${coin(v.exchSats)}">
       <i class="you" style="width:${youPct}%"></i><i class="buy" style="width:${buyPct}%"></i>
     </div>
@@ -714,11 +859,11 @@ function renderVault() {
       <div class="clock-foot"><span>Exit request confirms</span><span>${foot}</span></div>
       <p class="hint" style="margin-top:8px">${sub}</p>${best}
     </div>
-    <div class="actions">
+    <div class="actions" id="vaultActions">
       <button class="btn primary" id="settle" ${v.status === "open" ? "" : "disabled"}>Settle with the exchange</button>
       <button class="btn amber" id="exit" ${v.status === "open" ? "" : "disabled"}>Request exit</button>
       <button class="btn" id="claim" ${canClaim ? "" : "disabled"}>${esc(c.claimLabel)}</button>
-      ${rev ? `<button class="btn danger" id="cheat" ${canClaim ? "" : "disabled"} title="Publish your copy of an older state that paid you more">Publish an older state yourself</button>` : ""}
+      ${rev ? `<button class="btn danger tt" id="cheat" ${canClaim ? "" : "disabled"} title="Test tool: publish your copy of an older state that paid you more">Publish an older state yourself</button>` : ""}
     </div>
     <p class="hint">${v.status === "funding" ? (isPublic(c) ? "Waiting for the next block to confirm your deposit (or the exchange's) before trading." : "Mine a block to confirm your deposit before trading.") :
       v.status === "open" ? "Settling is instant when the exchange cooperates. Request an exit if it won't." : ""}</p>
@@ -798,7 +943,9 @@ function renderStatic() {
   lastChain = c.id; selectedTx = null;
   try { localStorage.setItem("ck-chain", c.id); } catch (e) {}
   document.title = `Castlekeep: ${c.name}`;
-  $("where").textContent = isPublic(c) ? "This coin runs on a public test network: real blocks, coins with no value." : "Running on private test chains.";
+  $("where").textContent = isPublic(c) ? "This coin runs on a public test network: real blocks, coins with no value." : "Running on private test chains on this computer: you make blocks with the Mine buttons.";
+  $("modelSum").textContent = `How the ${c.name} vault works, in detail`;
+  $("gloss").innerHTML = glossary(c).map(([k, d]) => `<dt>${esc(k)}</dt><dd>${esc(d)}</dd>`).join("");
   $("mineBtns").innerHTML = c.mineButtons.map((b, i) => `<button class="btn" data-mi="${i}" ${b.title ? `title="${esc(b.title)}"` : ""}>${esc(b.label)}</button>`).join("");
   $("mineBtns").querySelectorAll("button").forEach(b => b.onclick = () => { const m = c.mineButtons[+b.dataset.mi]; act({action: "mine", n: m.n || 0, secs: m.secs || 0}); });
   $("recipes").innerHTML = recipes(c).map(([h, p]) => `<div><h4>${esc(h)}</h4><p>${esc(p)}</p></div>`).join("");
@@ -867,11 +1014,17 @@ function render() {
   $("exchWallet").textContent = (S.exchWalletSats > 0 ? "+" : S.exchWalletSats < 0 ? "−" : "") + coin(Math.abs(S.exchWalletSats));
   document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === S.mode)));
   $("modeDesc").textContent = modeText[S.mode];
+  // With the test tools hidden, still say when the exchange isn't behaving normally.
+  $("modeNote").hidden = tools || !S.mode || S.mode === "honest";
+  $("modeNote").textContent = `The exchange is set to ${S.mode} (a test setting): ${modeText[S.mode] || ""} Switch on Test tools at the top to change it.`;
   $("wtBox").hidden = !S.hasUserWatchtower;
   $("wt").checked = !!S.watchtower;
+  $("wtLabel").textContent = S.watchtower ? "Your watchtower is on" : "Your watchtower is off";
   $("wtHint").textContent = c.evm
     ? "It watches exits for you and submits your newest signed state if an older one shows up."
     : "It watches the chain during an exit. If the exchange publishes a state you hold the revocation secret for, it uses the secret to take the exchange's share. If your latest state pays you more than you put in, it publishes that state for you.";
+  $("towerNote").hidden = !S.tower;
+  $("towerNote").textContent = S.tower || "";
   { const v = S.vault; capInput("orderAmt", !v ? null : side === "sell" ? v.userSats : buyable(v.exchSats, S.cashCents)); }
   capInput("lockAmt", S.walletSats);
   const amt = parseFloat($("orderAmt").value) || 0;
@@ -889,6 +1042,7 @@ function render() {
   renderSwap();
   renderBook();
   renderVault(); renderLog(); renderTxs();
+  renderStart();
 }
 
 // The order book panel: only the separate wallet program sends a book.
@@ -971,6 +1125,21 @@ document.addEventListener("click", e => {
   selectedTx = t.dataset.tx; renderTxs();
   if (t.classList.contains("link")) document.querySelector(".insp").scrollIntoView({behavior: "smooth", block: "start"});
 });
+// getting started and test tools
+$("steps").addEventListener("click", e => {
+  const b = e.target.closest("[data-step]");
+  if (!b) return;
+  const [what, arg] = b.dataset.step.split(":");
+  if (what === "show") return showMe(arg);
+  if (what === "faucet") return act({action: "faucet"});
+  if (what === "lock") return act({action: "lock", sats: Math.round(parseFloat(arg) * 1e8)});
+  if (what === "mine") { const m = S.chain.mineButtons[0]; return act({action: "mine", n: m.n || 0, secs: m.secs || 0}); }
+});
+$("startHide").onclick = () => { startHidden = true; remember("ck-start-hidden", true); renderStart(); };
+$("startShowBtn").onclick = () => { startHidden = false; remember("ck-start-hidden", false); renderStart(); };
+$("toolsOn").onchange = e => { setTools(e.target.checked); if (S && S.ready) render(); };
+setTools(tools);
+
 pollChains().then(poll); pollAccount();
 
 </script>

@@ -185,6 +185,11 @@ func (w *Wallet) Swap(from, to string, sats int64) error {
 	if from == to {
 		return userErr("Pick two different coins to swap.")
 	}
+	// Each side waits for the watchtower (see utxoAgree), so make sure it can
+	// be reached before starting: a swap stopped halfway is one side only.
+	if err := w.towerSend(true); err != nil {
+		return userErr("Your watchtower couldn't be reached, so the swap wasn't started. Start it again and retry. (%v)", err)
+	}
 	var prices [2]int64
 	for i, c := range []string{from, to} {
 		var info InfoResp

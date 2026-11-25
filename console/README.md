@@ -292,6 +292,44 @@ higher fee, and miners take both together.
 
 The one-program console still uses a flat fee: there you mine the blocks yourself.
 
+### A separate watchtower (keeps watching while your wallet is closed)
+
+Your wallet's own watchtower only works while the wallet program runs. On Bitcoin, if the
+exchange publishes an old state while it's closed, you have 6 blocks (about an hour on
+signet) to take the exchange's share before the exchange can keep it. The watchtower program
+keeps watching for you:
+
+```
+go run . watchtower
+go run . wallet -name alice -watchtower http://127.0.0.1:9400
+```
+
+The wallet remembers the watchtower (it's saved in the wallet's file); `-watchtower off` stops
+using it and tells the watchtower to forget everything it holds for you.
+
+- **It holds no keys to your coins.** After every trade your wallet hands it transactions
+  signed in advance that can only pay you: for each state the exchange has revoked, the
+  penalty sweep that takes the exchange's share; for each generation, your copy of the newest
+  state, signed by both, when it pays you more than your deposit. On the EVM chains it holds
+  your newest state with both signatures, which anyone may submit during an exit. Its only key
+  is a fee wallet for the gas on the EVM chains (the chains program funds it on the local
+  chains; on a public network, send it a little test coin).
+- **What it does:** if the exchange publishes an old Bitcoin or Litecoin state, it sends the
+  penalty sweep. If an exit request confirms and nobody publishes a state, it publishes your
+  newest one. On the EVM chains, during an exit, it submits your newest state if the contract
+  holds an older one (or none, when yours pays you more than your deposit).
+- **Your wallet updates it before giving anything up.** On Bitcoin and Litecoin the wallet
+  hands the watchtower each new state *before* it gives the exchange its secret for the old
+  one, so the watchtower never holds a state the exchange could punish. If the watchtower
+  can't be reached, the trade (or swap) is stopped before anything is handed over, and the
+  page says so. Updates only go forward: the watchtower never swaps a newer state for an older
+  one, and it only takes updates from the wallet that signed up with it (a random token).
+- **Its page** (`http://127.0.0.1:9400`) lists each wallet's vaults, what it holds and what it
+  did. The wallet page shows a line about it under **Your watchtower is on**.
+- **Limits:** it sees your vault transactions and amounts (a real one would get them encrypted
+  until needed), and the transactions signed in advance have the flat test fee, so it can't
+  speed them up. To keep it running all the time it needs a computer that stays on.
+
 ### Bitcoin signet (public test network)
 
 Signet is Bitcoin's public test network: real blocks about every 10 minutes, made by the
@@ -367,17 +405,20 @@ EVM chains. Their coins have no value and come from public faucets.
 
 | Area | What it does |
 | --- | --- |
+| **Start here** | A first try in five steps, ticked off as you go: get test coins, lock them, wait for the deposit to confirm, make a trade, get your coins back. Each step has one button that does it or shows you where. Below it, **What the words mean** explains vault, state, settle, exit window, watchtower and the rest. **Hide this guide** puts it away (the page remembers). |
+| **Test tools** (switch at the top) | Off at first. It shows the tools for trying the safety features: how the exchange behaves (honest, offline, malicious), setting the price, **Have the exchange try to steal**, **Publish an older state yourself**, the exchange's wallet change, and the **Things to try with the test tools** recipes. With it off, the page still says when the exchange has been set to offline or malicious. |
 | **Account bar** | Every coin you hold, the shared cash balance and the total value, on every tab. |
-| **Chain tabs** | Switch between the coins. Each has a small coloured badge (drawn by the page, not the coin's official logo). A green dot means ready. |
-| **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on the EVM chains they mine one block or skip the clock ahead an hour or a day. |
+| **Chain tabs** | Switch between the coins. Each has a small coloured badge (drawn by the page, not the coin's official logo). A green dot means ready. Under them, **How the … vault works, in detail** opens the technical description. |
+| **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on the EVM chains they mine one block or skip the clock ahead an hour or a day. (None on the public test networks: blocks come by themselves.) |
 | **Your wallet** | Test coins only you control. Get more from the faucet, or lock some into a vault. On the EVM chains, gas fees come out of this. |
-| **Vault** | The latest signed split, the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. |
-| **Exchange** | Set the price, sell or buy, swap into another coin, choose how the exchange behaves, and switch your watchtower on or off. |
+| **Vault** | Who owns what now (the latest split you both signed), the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. |
+| **Exchange** | Sell or buy, swap into another coin, and switch your watchtower on or off. |
 | **Activity and Transaction inspector** | Everything that happened, and the exact rule that accepted or refused each transaction. |
 
 ## Things to try
 
-Each tab's "Things to try" box has the steps for that chain. The best comparison:
+Switch on **Test tools** at the top first. Each tab's "Things to try with the test tools" box
+then has the steps for that chain. The best comparison:
 
 1. **Bitcoin tab:** sell 0.5, buy 0.5 back, set the exchange to malicious, request an exit,
    mine twice. The exchange publishes your *older* state, and your watchtower uses that
@@ -418,6 +459,7 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `split_apps.go`, `web/exchange.html` | The `chains`, `exchange` and `wallet` commands, and the exchange's admin page |
 | `split_eth.go`, `split_apps_eth.go` | The EVM chains in the separate programs |
 | `split_swap.go` | Swaps in the separate programs |
+| `split_tower.go`, `web/tower.html` | The separate watchtower program and its page, and the wallet's side of it |
 
 ## Known limits
 
@@ -426,6 +468,8 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
   and your watchtower publishes your latest state if it pays you more.
 - **Revocation on Bitcoin and Litecoin only works if someone is watching.** Your watchtower
   must sweep an old state within 6 blocks (BTC) or 24 blocks (LTC). Ethereum uses state numbers.
+  In the separate programs, the watchtower program does this while your wallet is closed, as
+  long as it keeps running.
 - **Buying capacity waits for a block each time.** You can ask for more as often as you like
   (up to 5 coins per request), but only one request waits for a block at a time. On signet
   that is about 10 minutes per request.
