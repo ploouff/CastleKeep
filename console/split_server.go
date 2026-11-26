@@ -82,3 +82,12 @@ func exchDown(err error, addr string) string {
 	}
 	return err.Error()
 }
+
+// waitHint is what to check when the chains program doesn't answer.
+func waitHint(url string) string {
+	if strings.Contains(url, "127.0.0.1") || strings.Contains(url, "localhost") {
+		return "Still waiting: the test chains don't answer at " + url + ". Is the chains program running?\n" +
+			"Start it in another window with  go run . chains  (or use  go run . start  for everything in one window)."
+	}
+	return "Still waiting: the server doesn't answer at " + url + ". Check the address, and that the server is up."
+}

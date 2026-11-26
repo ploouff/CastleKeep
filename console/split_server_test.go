@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -143,5 +144,14 @@ func TestLastWallet(t *testing.T) {
 	os.WriteFile(p, []byte("{}"), 0o600)
 	if n := lastWallet(dir); n != "" {
 		t.Fatalf("the unnamed wallet is newest, but %q", n)
+	}
+}
+
+func TestWaitHint(t *testing.T) {
+	if h := waitHint("http://127.0.0.1:9100"); !strings.Contains(h, "go run . chains") {
+		t.Fatalf("local hint: %q", h)
+	}
+	if h := waitHint("https://castlekeep.example.com/chains"); !strings.Contains(h, "server") || strings.Contains(h, "go run . chains") {
+		t.Fatalf("server hint: %q", h)
 	}
 }

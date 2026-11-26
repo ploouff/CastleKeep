@@ -318,6 +318,9 @@ On the wallet page (any of the ways above):
 - During an exit (Request exit, then a block), the guide's last step says the exit window is
   running; once it's over, its button takes your coins.
 - `go run . start` without `-name` opens the wallet you used last, and says which.
+- Start a wallet without the chains program: after ten seconds it says the chains don't
+  answer and how to start them.
+- Once a vault is closed, its buttons go away and the box to open the next vault shows.
 - Switch Windows to dark mode (Settings, Personalization, Colors): all three pages follow.
 
 ## What a failure looks like

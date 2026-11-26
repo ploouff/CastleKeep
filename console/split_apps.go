@@ -340,9 +340,15 @@ func runChains(args []string) {
 // chain's endpoint (eth, pol, base, bnb, avax) that the chains service runs.
 func waitChains(url string) (map[string]UTXOConfig, map[string]string, map[string]*EthEndpoint) {
 	fmt.Println("Waiting for the test chains at", url, "…")
+	started, hinted := time.Now(), false
 	for {
 		var st []ChainStatus
-		if err := call(url, "/chains", empty{}, &st); err == nil && len(st) > 0 {
+		err := call(url, "/chains", empty{}, &st)
+		if err != nil && !hinted && time.Since(started) > 10*time.Second {
+			hinted = true
+			fmt.Println(waitHint(url))
+		}
+		if err == nil && len(st) > 0 {
 			rpc, ready, cfgs := map[string]string{}, true, map[string]UTXOConfig{}
 			eps := map[string]*EthEndpoint{}
 			for _, c := range st {

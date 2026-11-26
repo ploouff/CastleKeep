@@ -1017,7 +1017,7 @@ function renderVault() {
       <div class="clock-foot"><span>Exit request confirms</span><span>${foot}</span></div>
       <p class="hint" style="margin-top:8px">${sub}</p>${best}
     </div>
-    <div class="actions" id="vaultActions">
+    <div class="actions" id="vaultActions" ${v.status === "closed" ? "hidden" : ""}>
       <button class="btn primary" id="settle" ${v.status === "open" ? "" : "disabled"}>Settle with the exchange</button>
       <button class="btn amber" id="exit" ${v.status === "open" ? "" : "disabled"}>Request exit</button>
       <button class="btn" id="claim" ${canClaim ? "" : "disabled"}>${esc(c.claimLabel)}</button>
