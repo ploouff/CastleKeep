@@ -8,7 +8,7 @@ and the exchange's key** to move. You trade against that locked balance as norma
 exchange disappears or turns hostile, you can always get your coins back on your own after
 a 144-block (about 24-hour) window.
 
-![Castlekeep console](console/preview-eth.png)
+![Castlekeep: a wallet page on Ethereum, with the exit window running](console/preview-eth.png)
 
 > **Test network only.** Everything here runs on a private Bitcoin test chain with
 > worthless test coins. The code has not been audited. Never use it with real bitcoin.

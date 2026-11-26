@@ -9,7 +9,7 @@ exchange between honest, offline and malicious.
 Every button creates real transactions, and the chain itself (a Bitcoin node, a Litecoin
 node, or the CastleVault smart contract on an EVM test node) decides whether each one is accepted or refused.
 
-![Castlekeep console on Ethereum](preview-eth.png)
+![Castlekeep: a wallet page on Ethereum, with the exit window running](preview-eth.png)
 
 > **Test networks only.** The coins have no value, nothing leaves your computer, and the
 > code hasn't been audited. Never use it with real coins.
@@ -449,7 +449,7 @@ EVM chains. Their coins have no value and come from public faucets.
 
 | Area | What it does |
 | --- | --- |
-| **Start here** | A first try in five steps, ticked off as you go: get test coins, lock them, wait for the deposit to confirm, make a trade, get your coins back. Each step has one button that does it or shows you where. Below it, **What the words mean** explains vault, state, settle, exit window, watchtower and the rest. **Hide this guide** puts it away (the page remembers). |
+| **Start here** | A first try in five steps, ticked off as you go: get test coins, lock them, wait for the deposit to confirm, make a trade, get your coins back. The steps sit in one row; under them, the current one says what to do and has one button that does it or shows you where. During an exit the last step follows it (the window running, then the button to take your coins). Once all five are done it folds to one line. Below it, **What the words mean** explains vault, state, settle, exit window, watchtower and the rest. **Hide this guide** puts it away (the page remembers). |
 | **Test tools** (switch at the top) | Off at first. It shows the tools for trying the safety features: how the exchange behaves (honest, offline, malicious), setting the price, **Have the exchange try to steal**, **Publish an older state yourself**, the exchange's wallet change, and the **Things to try with the test tools** recipes. With it off, the page still says when the exchange has been set to offline or malicious. |
 | **Account bar** | Every coin you hold, the shared cash balance (with **+ $10,000 test cash**) and the total value, on every tab. Pick a coin to go to its tab. On a narrow window only the totals show, with **Show coins**. |
 | **Chain tabs** | Switch between the coins. Each has a small coloured badge (drawn by the page, not the coin's official logo). A green dot means ready. Under them, **How the … vault works, in detail** opens the technical description. |

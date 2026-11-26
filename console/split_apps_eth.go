@@ -195,7 +195,7 @@ func (e *walletEthEngine) Snapshot() Snapshot {
 	}
 	s.Events = e.events
 	cv, _ := c.readVaultID(v.id)
-	vv := &VaultView{Locked: cv.amount, BestState: -1, PublishedState: -1, ClockTotal: we.delay,
+	vv := &VaultView{Locked: cv.amount, BestState: -1, PublishedState: -1, ClockTotal: we.delay, States: []StateView{},
 		UserDeposit: cv.userDep, ExchDeposit: cv.exchDep, FundPending: v.capPending, ExitSent: cv.exitStart != 0,
 		Address: c.contract + " (vault #" + v.id.String() + ")", CloseKind: v.closed, CloseTxid: v.closeTx,
 		Scripts: []Labelled{

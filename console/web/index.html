@@ -182,15 +182,16 @@ details pre{background:var(--card);border:1px solid var(--rule-soft);border-radi
 .start-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
 .start h2{font:600 20px/1.2 var(--display);margin:0;letter-spacing:.02em}
 .start .intro{margin:6px 0 14px;color:var(--steel);font-size:14px;max-width:95ch}
-.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
-.steps li{border:1px solid var(--rule-soft);border-radius:8px;padding:10px 12px 12px;background:var(--card)}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
+.steps li{border:1px solid var(--rule-soft);border-radius:8px;padding:8px 10px;background:var(--card)}
 .steps li.now{border-color:var(--pine);box-shadow:0 0 0 1px var(--pine)}
-.steps h3{font:600 15px/1.25 var(--display);margin:0 0 4px;display:flex;align-items:center;gap:8px;letter-spacing:.01em}
+.steps h3{font:600 14.5px/1.25 var(--display);margin:0;display:flex;align-items:center;gap:8px;letter-spacing:.01em}
 .steps .n{flex:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--rule-soft);font:600 12.5px var(--display)}
 .steps li.done .n{background:var(--pine-btn);color:#fff}
 .steps li.done h3{color:var(--steel)}
-.steps p{margin:0;font-size:13px;color:var(--steel)}
-.steps .btn{margin-top:9px}
+.step-now{margin-top:10px;padding:12px 14px;border:1px solid var(--pine);border-radius:8px;background:var(--card);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.step-now p{margin:0;flex:1 1 380px;font-size:14px;color:var(--steel)}
+.step-now p b{color:var(--ink);font-weight:600}
 .start-done{margin:14px 0 0;font-size:14px;padding:10px 12px;background:var(--pine-tint);border-radius:8px}
 .gloss{margin-top:14px}
 .gloss dl{display:grid;grid-template-columns:minmax(110px,max-content) 1fr;gap:7px 16px;font-size:13.5px;margin:10px 0 4px}
@@ -269,7 +270,7 @@ details.model p{margin:6px 0 0}
 .acct .coins .cell[aria-current="true"] .k{color:var(--ink);font-weight:600}
 .acct .k{font-size:12px;color:var(--steel);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .acct .v{font:600 17px/1.25 var(--display);white-space:nowrap}
-.acct .d{font-size:12px;color:var(--steel);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acct .d{font-size:12px;color:var(--steel);line-height:1.35}
 .acct .sums{display:flex;flex:none;border-left:1px solid var(--rule);padding-left:14px}
 .acct .sums .cell:last-child{border-right:0;margin-right:0}
 .acct .total .v{color:var(--pine)}
@@ -314,6 +315,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
   If the exchange disappears or cheats, you can still take your coins back on your own after a waiting period.
   Everything here uses test coins with no value.</p>
   <ol class="steps" id="steps"></ol>
+  <div class="step-now" id="stepNow"></div>
   <p class="start-done" id="startDone" hidden></p>
   <details class="gloss"><summary>What the words mean</summary><dl id="gloss"></dl></details>
 </section>
@@ -600,15 +602,34 @@ function startSteps() {
     {done: !!v && v.status !== "funding", title: "Wait for the deposit to confirm",
      text: pub ? `It counts once it's in a block: ${blockWait(c)}.` : "On a private test chain you make the next block yourself.",
      btn: mine1 ? ["mine", mine1.label] : null},
-    {done: !!v && (v.states.length > 1 || closedV), title: "Make a trade",
+    {done: !!v && ((v.states || []).length > 1 || closedV || ["exit_pending", "exit_window", "ready"].includes(v.status)), title: "Make a trade",
      text: `Sell some ${t} for test dollars in the Exchange panel. ` + (c.evm
        ? "You and the exchange both sign the new split, and a newer one always replaces an older one."
        : "You sign the new split before the order goes out, so a filled trade can't be undone."),
      btn: ["show:orderBox", "Show me"]},
-    {done: closedV, title: "Get your coins back",
+    exitStep(v, c, pub, mine1) || {done: closedV, title: "Get your coins back",
      text: `Settle with the exchange: you both sign and your share comes back ${pub ? "in the next block" : "once you mine a block"}. If the exchange ever stops answering, request an exit instead: after the exit window you take your coins without it.`,
      btn: ["show:vaultActions", "Show me"]}
   ];
+}
+
+// The last step while an exit is under way: what happens next, and the button for it.
+function exitStep(v, c, pub, mine1) {
+  if (!v) return null;
+  const t = "Get your coins back";
+  switch (v.status) {
+  case "exit_pending":
+    return {done: false, title: t, text: `Your exit request is on its way: it starts the exit clock once it's in a block${pub ? "" : " (mine one)"}.`,
+      btn: mine1 ? ["mine", mine1.label] : ["show:vaultActions", "Show me"]};
+  case "exit_window":
+    return {done: false, title: t, text: `The exit window is running (see the exit clock). During it the exchange can only answer with a state you both signed. When it's over, press "${c.claimLabel}".`
+      + (pub ? "" : ` On this private chain you can move time forward with the buttons at the top.`),
+      btn: ["show:vaultActions", "Show me"]};
+  case "ready":
+    return {done: false, title: t, text: `The exit window is over: "${c.claimLabel}" takes your coins without the exchange.`,
+      btn: ["claim", c.claimLabel]};
+  }
+  return null;
 }
 
 function renderStart() {
@@ -616,13 +637,15 @@ function renderStart() {
   $("startShow").hidden = !startHidden;
   if (startHidden) return;
   const steps = startSteps(), now = steps.findIndex(s => !s.done);
-  setHTML("steps", steps.map((s, i) => `<li class="${s.done ? "done" : i === now ? "now" : ""}">
-    <h3><span class="n">${s.done ? "✓" : i + 1}</span>${esc(s.title)}</h3>
-    ${s.done ? "" : `<p>${esc(s.text)}</p>`}
-    ${!s.done && i === now && s.btn ? `<button class="btn ${s.btn[0].startsWith("show:") ? "" : "primary"}" data-step="${esc(s.btn[0])}">${esc(s.btn[1])}</button>` : ""}</li>`).join(""));
+  // A row of the five steps, and under it what to do in the current one.
+  setHTML("steps", steps.map((s, i) => `<li class="${s.done ? "done" : i === now ? "now" : ""}"${i === now ? ` aria-current="step"` : ""}>
+    <h3><span class="n">${s.done ? "✓" : i + 1}</span>${esc(s.title)}</h3></li>`).join(""));
+  const st = steps[now];
+  setHTML("stepNow", !st ? "" : `<p><b>Step ${now + 1}: ${esc(st.title)}.</b> ${esc(st.text)}</p>
+    ${st.btn ? `<button class="btn ${st.btn[0].startsWith("show:") ? "" : "primary"}" data-step="${esc(st.btn[0])}">${esc(st.btn[1])}</button>` : ""}`);
   const done = now < 0;
   // All five done: the steps fold away, leaving the next idea.
-  $("steps").hidden = done; $("startIntro").hidden = done;
+  $("steps").hidden = done; $("stepNow").hidden = done; $("startIntro").hidden = done;
   $("startDone").hidden = !done;
   if (done) {
     setHTML("startDone", `That's the whole cycle: coins in, a trade, coins out. Next, see what happens when the exchange misbehaves:
@@ -692,7 +715,8 @@ async function pollChains() {
   try {
     chains = await (await fetch("/api/chains")).json();
     if (!cur) {
-      const saved = (() => { try { return localStorage.getItem("ck-chain"); } catch (e) { return null; } })();
+      // ?chain=eth in the address picks the tab; otherwise the one used last.
+      const saved = new URLSearchParams(location.search).get("chain") || (() => { try { return localStorage.getItem("ck-chain"); } catch (e) { return null; } })();
       cur = (chains.find(c => c.id === saved) || chains.find(c => c.available) || chains[0]).id;
     }
     renderTabs();
@@ -948,10 +972,10 @@ function renderVault() {
   const revCell = s => !rev ? "" : `<td class="mono small">${s.secret
     ? `secret <span title="${esc(s.secret)}">${esc(s.secret.slice(0, 10))}…</span>`
     : `hash <span title="${esc(s.revHash)}">${esc((s.revHash || "").slice(0, 10))}…</span>`}</td>`;
-  const rows = v.states.slice().reverse().map((s, i) => `
+  const rows = (v.states || []).slice().reverse().map((s, i) => `
     <tr class="${i === 0 ? "latest" : ""}"><td>${s.index}</td><td>${esc(s.label)}</td>
     <td class="r">${coin(s.userSats, 4)}</td><td class="r">${coin(s.exchSats, 4)}</td>${revCell(s)}</tr>`).join("");
-  const held = rev ? v.states.filter(s => s.secret) : [];
+  const held = rev ? (v.states || []).filter(s => s.secret) : [];
   const revNote = !rev ? "" : `<p class="hint" style="margin:8px 0 0">${held.length
     ? `Revocation secrets you hold: <b>${held.map(s => "#" + s.index).join(", ")}</b>. Those states are replaced. If the exchange publishes one of them, your watchtower uses its secret to take the exchange's share (a penalty sweep). The exchange holds your secrets for the same states, so the same goes for you. For the latest state you only have the hash.`
     : "Revocation secrets you hold: none yet. Each time a newer state is signed, the exchange hands you the secret of the one it replaces."}</p>`;
@@ -1306,7 +1330,7 @@ document.addEventListener("click", e => {
   if (t.classList.contains("link")) document.querySelector(".insp").scrollIntoView({behavior: "smooth", block: "start"});
 });
 // getting started and test tools
-$("steps").addEventListener("click", e => {
+$("start").addEventListener("click", e => {
   const b = e.target.closest("[data-step]");
   if (!b) return;
   const [what, arg] = b.dataset.step.split(":");
@@ -1314,6 +1338,7 @@ $("steps").addEventListener("click", e => {
   if (what === "faucet") return act({action: "faucet"});
   if (what === "lock") return act({action: "lock", sats: Math.round(parseFloat(arg) * 1e8)});
   if (what === "mine") { const m = S.chain.mineButtons[0]; return act({action: "mine", n: m.n || 0, secs: m.secs || 0}); }
+  if (what === "claim") return act({action: "claim"});
 });
 $("startHide").onclick = () => { startHidden = true; remember("ck-start-hidden", true); renderStart(); };
 $("startShowBtn").onclick = () => { startHidden = false; remember("ck-start-hidden", false); renderStart(); };
