@@ -78,6 +78,9 @@ type Wallet struct {
 	towerErr          string
 	towerAt           time.Time
 	towerStat         *TowerStatus
+
+	// answers to the exchange's read-only calls, reused for a moment (split_limits.go)
+	reads readCache
 }
 
 func NewWallet(exchangeURL string, cfgs map[string]UTXOConfig, rpc map[string]string) (*Wallet, error) {

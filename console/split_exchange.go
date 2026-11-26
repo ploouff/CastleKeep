@@ -93,6 +93,7 @@ type Exchange struct {
 	adminToken string            // saved
 	acctKeys   map[string]string // account -> its key (x-only, hex), from its first signed request; saved
 	seen       map[string]int64  // signatures already used -> when
+	guard      *guard            // limits (split_limits.go)
 }
 
 // NewExchange connects to each chain's node. rpc maps chain id to the
@@ -151,12 +152,12 @@ func (x *Exchange) Handler() http.Handler {
 	m.Handle("/v1/state", adminOnly(x.adminOK, handle(x.state)))
 	m.Handle("/v1/tick", adminOnly(x.adminOK, handle(func(empty) (empty, error) { x.Tick(); return empty{}, nil })))
 	// Save after every request (only writes when something changed).
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return perAddress(x.limits, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.ServeHTTP(w, r)
 		x.mu.Lock()
 		x.save()
 		x.mu.Unlock()
-	})
+	}))
 }
 
 func (v *xVault) log(f string, a ...any) { v.events = append(v.events, fmt.Sprintf(f, a...)) }
@@ -188,6 +189,9 @@ func (x *Exchange) openKeys(r OpenKeysReq) (OpenKeysResp, error) {
 	}
 	if xc.mode == "offline" {
 		return OpenKeysResp{}, userErr("The exchange is offline.")
+	}
+	if err := x.vaultRoom(r.Account); err != nil {
+		return OpenKeysResp{}, err
 	}
 	k, _ := btcec.NewPrivateKey()
 	def, err := newVaultDef(r.UserPub, xonly(k), r.UserPay, xc.pay, xc.cfg.ExitDelay, xc.cfg.PenaltyDelay)
@@ -410,7 +414,11 @@ func (x *Exchange) settle(r SettleReq) (SettleResp, error) {
 func (x *Exchange) addCash(r CashReq) (CashResp, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	x.cash[r.Account] += testCashCents
+	add, err := x.cashToAdd(r.Account)
+	if err != nil {
+		return CashResp{}, err
+	}
+	x.cash[r.Account] += add
 	return CashResp{x.cash[r.Account]}, nil
 }
 

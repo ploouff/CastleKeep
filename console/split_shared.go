@@ -15,6 +15,9 @@ package main
 //   - The chains program passes on to the Bitcoin node only the calls the
 //     programs need (rpcGateway), and its faucet, mine and contract endpoints
 //     only answer programs on the same computer (localOnly).
+//   - Limits on how often and how much (split_limits.go): requests a second
+//     per address and per account, accounts, vaults, orders, test cash, what
+//     the watchtower keeps, calls to the node at once.
 //
 // Without -shared everything works as before (one computer, no checks).
 // Test networks only. Not audited.
@@ -72,7 +75,15 @@ func signedHeaders(account string, key *btcec.PrivateKey) func(path string, body
 
 // call sends a request to the exchange, signed with the wallet's account key.
 func (w *Wallet) call(path string, req, resp any) error {
-	return callHeaders("the exchange", httpClient, w.base, path, req, resp, signedHeaders(w.Account, w.acctKey))
+	err := callHeaders("the exchange", httpClient, w.base, path, req, resp, signedHeaders(w.Account, w.acctKey))
+	w.reads.sent(path)
+	return err
+}
+
+// look is call for what the page shows (prices, cash, order books): an
+// answer is reused for a moment (readCache, split_limits.go).
+func (w *Wallet) look(path string, req, resp any) error {
+	return w.reads.look(path, req, resp, func() error { return w.call(path, req, resp) })
 }
 
 // validAccount: letters, digits, - and _ only, as wallets make them (name-1a2b3c4d).
@@ -111,6 +122,9 @@ func (x *Exchange) Shared() string {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	x.shared = true
+	if x.guard == nil {
+		x.guard = newGuard(DefaultLimits())
+	}
 	if x.adminToken == "" {
 		x.adminToken = newToken()
 		x.save()
@@ -127,9 +141,17 @@ func authed[Req, Resp any](x *Exchange, fn func(Req) (Resp, error)) http.Handler
 			inner(w, r)
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		most := int64(1 << 20)
+		if g := x.limits(); g != nil && g.Body > 0 {
+			most = g.Body
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, most+1))
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "Bad request.")
+			return
+		}
+		if int64(len(body)) > most {
+			writeErr(w, http.StatusRequestEntityTooLarge, "That request is too big.")
 			return
 		}
 		acct, err := x.checkSigned(r, body)
@@ -140,7 +162,11 @@ func authed[Req, Resp any](x *Exchange, fn func(Req) (Resp, error)) http.Handler
 			}
 		}
 		if err != nil {
-			writeErr(w, http.StatusForbidden, err.Error())
+			code := http.StatusForbidden
+			if _, ok := err.(limitErr); ok {
+				code = http.StatusTooManyRequests
+			}
+			writeErr(w, code, err.Error())
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
@@ -190,7 +216,15 @@ func (x *Exchange) checkSigned(r *http.Request, body []byte) (string, error) {
 		}
 	}
 	x.seen[sigHex] = now
+	if x.guard != nil && !x.guard.acct.allow(acct) {
+		return "", limitErr(tooManyWallet)
+	}
 	if _, ok := x.acctKeys[acct]; !ok {
+		if x.guard != nil {
+			if err := x.guard.newAddress(addrOf(r), len(x.acctKeys), "account"); err != nil {
+				return "", err
+			}
+		}
 		x.acctKeys[acct] = keyHex
 		x.save()
 	}
@@ -311,6 +345,9 @@ func (t *Tower) Shared() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.shared = true
+	if t.guard == nil {
+		t.guard = newGuard(DefaultLimits())
+	}
 	if t.adminToken == "" {
 		t.adminToken = newToken()
 		t.save()
@@ -349,8 +386,9 @@ var gatewayMethods = map[string]bool{
 var gatewayClient = &http.Client{Timeout: 30 * time.Second}
 
 // rpcGateway passes allowed JSON-RPC calls on to a node (addr gives its
-// host:port), adding the node's password itself.
-func rpcGateway(addr func() string) http.HandlerFunc {
+// host:port), adding the node's password itself. g limits how many calls
+// from outside the server reach the node at once (nil: no limit).
+func rpcGateway(addr func() string, g *guard) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST a JSON-RPC call.", http.StatusMethodNotAllowed)
@@ -367,6 +405,14 @@ func rpcGateway(addr func() string) http.HandlerFunc {
 		if !gatewayMethods[strings.ToLower(call.Method)] {
 			http.Error(w, "The gateway doesn't pass on "+call.Method+".", http.StatusForbidden)
 			return
+		}
+		if addrOf(r) != "" {
+			release, ok := g.enterNode()
+			if !ok {
+				http.Error(w, "The node is busy. Try again in a moment.", http.StatusServiceUnavailable)
+				return
+			}
+			defer release()
 		}
 		up, err := http.NewRequest(http.MethodPost, "http://"+addr(), bytes.NewReader(body))
 		if err != nil {

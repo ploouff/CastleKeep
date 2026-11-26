@@ -231,7 +231,11 @@ func handle[Req, Resp any](fn func(Req) (Resp, error)) http.HandlerFunc {
 		resp, err := fn(req)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			code := http.StatusBadRequest
+			if _, ok := err.(limitErr); ok { // split_limits.go
+				code = http.StatusTooManyRequests
+			}
+			w.WriteHeader(code)
 			json.NewEncoder(w).Encode(apiErr{err.Error()})
 			return
 		}

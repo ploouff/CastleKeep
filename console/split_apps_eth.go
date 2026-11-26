@@ -159,13 +159,13 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 func (e *walletEthEngine) Snapshot() Snapshot {
 	s := Snapshot{Chain: e.info, Available: true, Ready: true, Progress: "Ready", Watchtower: e.w.WT, HasUserWT: true, Txs: []*TxInfo{}}
 	var info InfoResp
-	if err := e.w.call("/v1/info", InfoReq{e.id}, &info); err == nil {
+	if err := e.w.look("/v1/info", InfoReq{e.id}, &info); err == nil {
 		s.Price, s.Mode = info.Price, info.Mode
 	} else {
 		s.Mode = "offline"
 	}
 	var cr CashResp
-	if e.w.call("/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
+	if e.w.look("/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
 		s.CashCents = cr.CashCents
 	}
 	s.Who, s.Book = e.w.Name, e.w.bookSnapshot(e.id)

@@ -260,6 +260,13 @@ By hand:
   the same computer.
 - A wallet that reaches the chain only through the gateway can lock, trade and settle.
 - A shared watchtower's page needs the token.
+- `go test -run "Limit|AddrOf|GatewayNodeCalls" -v` checks the limits: requests a second
+  from one address and one account (429 Too Many Requests), new accounts a day from one
+  address and in all, vaults (unfinished ones make room), open orders, the "Add test cash"
+  ceiling, request size, what the watchtower keeps per wallet, and calls to the node at once.
+  Requests from the server itself aren't counted, and without `-shared` nothing is limited.
+  `TestWalletPageReads` checks the wallet reuses the page's reads for 2 seconds and asks
+  again straight after anything it does itself.
 
 By hand on your own PC (no server needed), with the public test networks:
 

@@ -151,6 +151,7 @@ type Tower struct {
 	// shared mode (split_shared.go): its page lists every wallet, so it needs the admin token
 	shared     bool
 	adminToken string // saved
+	guard      *guard // limits (split_limits.go)
 }
 
 // towerFeeMin is what the watchtower wants on an EVM chain to pay for a
@@ -200,11 +201,14 @@ func (t *Tower) FeeAddress() string {
 
 func (t *Tower) Handler() http.Handler {
 	m := http.NewServeMux()
-	m.Handle("/v1/tower/update", handle(t.update))
+	m.HandleFunc("/v1/tower/update", func(w http.ResponseWriter, r *http.Request) {
+		from := addrOf(r)
+		handle(func(u TowerUpdate) (TowerStatus, error) { return t.updateFrom(from, u) })(w, r)
+	})
 	m.Handle("/v1/tower/status", handle(t.status))
 	m.Handle("/v1/tower/forget", handle(t.forget))
 	m.Handle("/v1/tower/view", adminOnly(t.adminOK, handle(func(empty) (TowerView, error) { return t.View(), nil })))
-	return m
+	return perAddress(t.limits, m)
 }
 
 func tokenHash(tok string) string {
@@ -234,7 +238,11 @@ func (t *Tower) wallet(a TowerAuth, register bool) (*towerWallet, error) {
 	return tw, nil
 }
 
-func (t *Tower) update(u TowerUpdate) (TowerStatus, error) {
+func (t *Tower) update(u TowerUpdate) (TowerStatus, error) { return t.updateFrom("", u) }
+
+// updateFrom is update for a request from an address (for the limits on a
+// shared watchtower; "" is this computer).
+func (t *Tower) updateFrom(from string, u TowerUpdate) (TowerStatus, error) {
 	// Check everything before changing anything.
 	for _, v := range u.UTXO {
 		if err := checkTowerUTXO(v); err != nil {
@@ -248,6 +256,18 @@ func (t *Tower) update(u TowerUpdate) (TowerStatus, error) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	known, err := t.wallet(TowerAuth{u.Wallet, u.Token}, false)
+	if err != nil {
+		return TowerStatus{}, err
+	}
+	if err := t.towerRoom(known, u); err != nil {
+		return TowerStatus{}, err
+	}
+	if known == nil && t.shared && t.guard != nil {
+		if err := t.guard.newAddress(from, len(t.wallets), "wallet"); err != nil {
+			return TowerStatus{}, err
+		}
+	}
 	tw, err := t.wallet(TowerAuth{u.Wallet, u.Token}, true)
 	if err != nil {
 		return TowerStatus{}, err
