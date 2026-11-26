@@ -315,6 +315,9 @@ On the wallet page (any of the ways above):
   switches side and fills in that price.
 - Stop the exchange (Ctrl+C in its window) with a wallet page open: a banner says the
   exchange isn't answering and trading waits. Start it again: the banner goes away.
+- During an exit (Request exit, then a block), the guide's last step says the exit window is
+  running; once it's over, its button takes your coins.
+- `go run . start` without `-name` opens the wallet you used last, and says which.
 - Switch Windows to dark mode (Settings, Personalization, Colors): all three pages follow.
 
 ## What a failure looks like

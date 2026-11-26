@@ -10,8 +10,9 @@ a 144-block (about 24-hour) window.
 
 ![Castlekeep: a wallet page on Ethereum, with the exit window running](console/preview-eth.png)
 
-> **Test network only.** Everything here runs on a private Bitcoin test chain with
-> worthless test coins. The code has not been audited. Never use it with real bitcoin.
+> **Test networks only.** Everything here runs on private test chains on your computer, or on
+> public test networks (Bitcoin's signet, Sepolia and the like) whose coins have no value. Main
+> networks are refused. The code has not been audited. Never use it with real coins.
 
 ## Why
 

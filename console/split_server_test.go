@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestServerAddress(t *testing.T) {
@@ -118,5 +119,29 @@ func TestExchangeDownMessage(t *testing.T) {
 	}
 	if got := exchDown(userErr("The exchange said: Too many requests from your wallet."), "x"); got != "The exchange said: Too many requests from your wallet." {
 		t.Fatalf("a refusal: %q", got)
+	}
+}
+
+// go run . start without -name uses the wallet saved last.
+func TestLastWallet(t *testing.T) {
+	dir := t.TempDir()
+	if n := lastWallet(dir); n != "" {
+		t.Fatalf("no wallets, but %q", n)
+	}
+	at := time.Now().Add(-time.Hour)
+	for i, f := range []string{"wallet-bob.json", "wallet-alice.json", "exchange.json", "wallet-carol.json.old-20261127-010000", "wallet-dave.json.tmp"} {
+		p := filepath.Join(dir, f)
+		if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		os.Chtimes(p, at.Add(time.Duration(i)*time.Minute), at.Add(time.Duration(i)*time.Minute))
+	}
+	if n := lastWallet(dir); n != "alice" {
+		t.Fatalf("last wallet %q, want alice (renamed and half-written files don't count)", n)
+	}
+	p := filepath.Join(dir, "wallet.json") // the unnamed wallet, newest
+	os.WriteFile(p, []byte("{}"), 0o600)
+	if n := lastWallet(dir); n != "" {
+		t.Fatalf("the unnamed wallet is newest, but %q", n)
 	}
 }

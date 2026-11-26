@@ -135,6 +135,17 @@ func runStart(args []string) {
 	}
 
 	walletArgs := append([]string{"wallet", "-port", fmt.Sprint(walletPort), "-chains", chainsURL, "-exchange", exchURL}, common...)
+	if *name == "" && !*fresh {
+		// No name given: the wallet used last on these chains, if there is one.
+		dir := *data
+		if *network != "regtest" {
+			dir = filepath.Join(*data, publicFolder)
+		}
+		if n := lastWallet(dir); n != "" {
+			*name = n
+			s.say("Using your wallet %q (the one used last; start with -name to pick another).", n)
+		}
+	}
 	if *name != "" {
 		walletArgs = append(walletArgs, "-name", *name)
 	}
@@ -302,4 +313,30 @@ func chainsReady(url string) bool {
 		}
 	}
 	return true
+}
+
+// lastWallet is the name of the wallet saved most recently in dir ("" for
+// the unnamed wallet.json, or if there is none).
+func lastWallet(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	best, when := "", time.Time{}
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || !strings.HasPrefix(n, "wallet") || !strings.HasSuffix(n, ".json") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.ModTime().After(when) {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(n, "wallet"), "-"), ".json")
+		if n != "wallet.json" && (name == "" || !validName(name)) {
+			continue
+		}
+		best, when = name, info.ModTime()
+	}
+	return best
 }

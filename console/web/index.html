@@ -113,6 +113,8 @@ details summary{cursor:pointer;color:var(--slate);font-size:14px}
 details pre{background:var(--card);border:1px solid var(--rule-soft);border-radius:6px;padding:10px;white-space:pre-wrap;margin:8px 0 0}
 .empty{text-align:center;padding:26px 12px 20px}
 .empty p{max-width:46ch;margin:8px auto 0;color:var(--steel)}
+.capbox{margin-top:14px;padding:10px 14px;border:1px dashed var(--rule);border-radius:8px;background:var(--card)}
+.capbox summary{color:var(--ink);font-weight:600;font-size:14px}
 .lockbox{margin:4px 0 16px;padding:14px 16px;border:1px dashed var(--pine);border-radius:8px;background:var(--card)}
 .lockbox label{color:var(--ink);font-weight:600}
 .hint.why{color:var(--ink)}
@@ -380,6 +382,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <p class="hint" id="orderEst"></p>
     <button class="btn primary block" id="order" style="margin-top:10px">Sign and sell</button>
     <p class="hint" id="orderHint"></p>
+    <p class="small" id="bookLink" hidden style="margin:6px 0 0"><button class="link" type="button" id="toBook">Or set your own price in the order book, with other wallets</button></p>
     </div>
     <hr class="divider">
     <label for="swapTo">Swap into another coin</label>
@@ -1051,13 +1054,18 @@ function capacityBlock(v, c) {
     : `Ask the exchange to add its own ${esc(c.ticker)} to your vault so you can buy from it. You both sign one transaction that moves the vault and the exchange's coins into a bigger vault. You can ask again later for more.`;
   const wait = v.fundPending
     ? `<p class="hint" style="margin:8px 0 0;color:var(--ink)">The exchange's last deposit is waiting for a block. ${isPublic(c) ? "Once the next block comes" : "Mine one, and once it's in"}, the capacity is added and you can ask for more.</p>` : "";
-  return info + `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:var(--card)">
-      <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 || v.fundPending ? "Add more buying capacity" : "Buy more than you sell"}</label>
-      <p class="hint" style="margin:0 0 8px">${how} Up to 5 ${esc(c.ticker)} per request. Fee: 0.2% of the amount, taken from your share.</p>
+  // Folded until you open it (or have used it): most first trades don't need it.
+  const open = capOpen ?? (v.exchDeposit > 0 || v.fundPending);
+  return info + `<details class="capbox" id="capBox" ${open ? "open" : ""}>
+      <summary>${v.exchDeposit > 0 || v.fundPending ? "Add more buying capacity" : "Buy more than you sell"}</summary>
+      <p class="hint" style="margin:6px 0 8px">${how} Up to 5 ${esc(c.ticker)} per request. Fee: 0.2% of the amount, taken from your share.</p>
       <div class="field"><input id="capAmt" type="number" min="0.001" max="5" step="0.5" value="${esc(c.defaultLock)}" inputmode="decimal" aria-label="Buying capacity in ${esc(c.ticker)}">
       <button class="btn" id="capBtn" ${v.fundPending ? "disabled" : ""}>Ask the exchange to lock ${esc(c.ticker)}</button></div>${wait}
-    </div>`;
+    </details>`;
 }
+// Whether you opened or closed the buying-capacity box (null: not touched yet).
+let capOpen = null;
+document.addEventListener("toggle", e => { if (e.target.id === "capBox") capOpen = e.target.open; }, true);
 
 function renderLog() {
   const log = $("log"), key = S.chain.id + ":" + S.events.length;
@@ -1211,6 +1219,7 @@ const setHTML = (id, h) => { const el = $(id); if (el.dataset.h !== h) { el.inne
 function renderBook() {
   const b = S.book, c = S.chain;
   $("bookPanel").hidden = !b;
+  $("bookLink").hidden = !b;
   $("who").textContent = S.who ? `${S.who}'s wallet` : "";
   if (S.who) document.title = `Castlekeep: ${S.who}, ${c.name}`;
   if (!b) return;
@@ -1279,6 +1288,8 @@ $("tabs").addEventListener("keydown", e => {
   setTimeout(() => { const t = document.querySelector(`[data-chain="${next}"]`); if (t) t.focus(); }, 0);
 });
 $("toast").onclick = () => $("toast").hidden = true;
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("toast").hidden = true; });
+$("toBook").onclick = () => showMe("bookPanel");
 $("copyAddr").onclick = async () => {
   const a = $("recvAddr").textContent;
   try { await navigator.clipboard.writeText(a); toast("Address copied. Paste it into the faucet."); }

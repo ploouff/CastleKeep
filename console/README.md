@@ -167,7 +167,7 @@ go run . start
 It starts the test chains, the exchange, a watchtower and your wallet in order, labels each
 line with the program it came from, opens your wallet's page and prints the addresses of the
 other pages. Ctrl+C stops everything, test nodes included. Options: `-name alice` (your
-wallet's name), `-network testnets` (the public test networks), `-no-watchtower`, `-fresh`,
+wallet's name; without it, the wallet you used last), `-network testnets` (the public test networks), `-no-watchtower`, `-fresh`,
 `-ports 9600` (a second set beside the first). With a password-protected file, start the
 programs one by one instead, so each can ask for it.
 
