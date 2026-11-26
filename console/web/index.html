@@ -13,7 +13,21 @@
   --display:"Bahnschrift","DIN Alternate","DIN 2014","Barlow","Roboto Condensed","Arial Narrow",sans-serif;
   --body:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
   --mono:"Cascadia Mono",Consolas,"SF Mono",ui-monospace,monospace;
+  --card:#fff; --vault-bg:#FBFCFC; --bad-bg:#FCF6F5; --idle:#E3E8EC; --amber-ink:#7a4f08; --over:#b4442c;
+  --pine-btn:#2D5D4C; --pine-hover:#244c3e; --sel-bg:#17212B; --sel-ink:#fff; --toast-bg:#17212B; --toast-ink:#fff; --red-strong:#A3322A;
+  color-scheme:light dark;
 }
+/* Dark mode follows the computer's own setting. */
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#11171D; --panel:#182028; --ink:#E3E8ED; --steel:#9BA8B4; --rule:#34414D; --rule-soft:#29343E;
+    --pine:#5BAA8C; --pine-tint:#1E372E; --slate:#93AFD0; --slate-tint:#223140;
+    --amber:#D69D3E; --amber-tint:#3A2D16; --red:#E26F64; --red-tint:#3C2220;
+    --card:#1F2830; --vault-bg:#1B242C; --bad-bg:#2D1E1D; --idle:#26313B; --amber-ink:#E3BC6E; --over:#E26F64;
+    --pine-btn:#2F6E57; --pine-hover:#38806A; --sel-bg:#E3E8ED; --sel-ink:#11171D; --toast-bg:#E3E8ED; --toast-ink:#11171D;
+  }
+}
+a{color:var(--slate)}
 *{box-sizing:border-box}
 html{background:var(--paper)}
 body{margin:0;font:15px/1.5 var(--body);color:var(--ink);font-variant-numeric:tabular-nums}
@@ -36,12 +50,12 @@ header{display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:18px 28px
 .mine{display:flex;gap:6px}
 
 /* buttons */
-.btn{border:1px solid var(--rule);background:#fff;border-radius:6px;padding:7px 13px;cursor:pointer;white-space:nowrap}
+.btn{border:1px solid var(--rule);background:var(--card);border-radius:6px;padding:7px 13px;cursor:pointer;white-space:nowrap}
 .btn:hover:not(:disabled){border-color:var(--steel)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
-.btn.primary{background:var(--pine);border-color:var(--pine);color:#fff}
-.btn.primary:hover:not(:disabled){background:#244c3e}
-.btn.amber{border-color:var(--amber);color:#7a4f08}
+.btn.primary{background:var(--pine-btn);border-color:var(--pine-btn);color:#fff}
+.btn.primary:hover:not(:disabled){background:var(--pine-hover)}
+.btn.amber{border-color:var(--amber);color:var(--amber-ink)}
 .btn.danger{border-color:var(--red);color:var(--red)}
 .btn.block{width:100%;white-space:normal}
 
@@ -56,19 +70,19 @@ main{display:grid;grid-template-columns:minmax(250px,290px) minmax(0,1fr) minmax
 .figure small{font-size:15px;color:var(--steel);font-weight:500}
 label{display:block;font-size:13.5px;color:var(--steel);margin-bottom:5px}
 .field{display:flex;gap:8px}
-.field input{flex:1;min-width:0;width:100%;border:1px solid var(--rule);border-radius:6px;padding:7px 10px;background:#fff}
-.field input.over{border-color:#b4442c;box-shadow:0 0 0 1px #b4442c}
+.field input{flex:1;min-width:0;width:100%;border:1px solid var(--rule);border-radius:6px;padding:7px 10px;background:var(--card)}
+.field input.over{border-color:var(--over);box-shadow:0 0 0 1px var(--over)}
 .hint{font-size:13px;color:var(--steel);margin:6px 0 0}
 
 /* vault */
-.vault{border:2px solid var(--pine);background:#FBFCFC;border-radius:12px;padding:22px 24px}
+.vault{border:2px solid var(--pine);background:var(--vault-bg);border-radius:12px;padding:22px 24px}
 .vault-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .status{font-size:13.5px;padding:4px 10px;border-radius:999px;background:var(--rule-soft);color:var(--ink)}
 .status.open{background:var(--pine-tint);color:var(--pine)}
-.status.wait{background:var(--amber-tint);color:#7a4f08}
+.status.wait{background:var(--amber-tint);color:var(--amber-ink)}
 .status.closed{background:var(--slate-tint);color:var(--slate)}
 .keys{display:flex;gap:10px;margin:16px 0 4px;flex-wrap:wrap}
-.key{display:flex;align-items:center;gap:9px;border:1px solid var(--rule);border-radius:8px;padding:8px 12px;background:#fff;font-size:14px}
+.key{display:flex;align-items:center;gap:9px;border:1px solid var(--rule);border-radius:8px;padding:8px 12px;background:var(--card);font-size:14px}
 .key svg{flex:none}
 .keys-note{font-size:13px;color:var(--steel);margin:6px 0 18px}
 .split-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
@@ -79,14 +93,14 @@ label{display:block;font-size:13.5px;color:var(--steel);margin-bottom:5px}
 .legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:7px;vertical-align:-1px;background:var(--c)}
 
 /* exit clock: the one memorable element */
-.clock{margin-top:22px;padding:16px 16px 14px;border-radius:10px;background:#fff;border:1px solid var(--rule-soft)}
+.clock{margin-top:22px;padding:16px 16px 14px;border-radius:10px;background:var(--card);border:1px solid var(--rule-soft)}
 .clock-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .clock-head h3{font:600 16px/1.2 var(--display);margin:0;letter-spacing:.02em}
 .ticks{display:grid;grid-template-columns:repeat(72,1fr);gap:3px}
 .ticks i{height:18px;border-radius:2px;background:var(--rule-soft);transition:background-color .25s ease}
 .ticks i.on{background:var(--amber)}
 .ticks.done i.on{background:var(--pine)}
-.ticks.idle i{background:#E3E8EC}
+.ticks.idle i{background:var(--idle)}
 .clock-foot{display:flex;justify-content:space-between;font-size:12.5px;color:var(--steel);margin-top:7px}
 .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
 .actions .btn{padding:9px 16px}
@@ -96,10 +110,10 @@ label{display:block;font-size:13.5px;color:var(--steel);margin-bottom:5px}
 .states td.r,.states th.r{text-align:right}
 .states tr.latest td{background:var(--pine-tint)}
 details summary{cursor:pointer;color:var(--slate);font-size:14px}
-details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:10px;white-space:pre-wrap;margin:8px 0 0}
+details pre{background:var(--card);border:1px solid var(--rule-soft);border-radius:6px;padding:10px;white-space:pre-wrap;margin:8px 0 0}
 .empty{text-align:center;padding:26px 12px 20px}
 .empty p{max-width:46ch;margin:8px auto 0;color:var(--steel)}
-.lockbox{margin:4px 0 16px;padding:14px 16px;border:1px dashed var(--pine);border-radius:8px;background:#fff}
+.lockbox{margin:4px 0 16px;padding:14px 16px;border:1px dashed var(--pine);border-radius:8px;background:var(--card)}
 .lockbox label{color:var(--ink);font-weight:600}
 .hint.why{color:var(--ink)}
 .btn.working:disabled{opacity:1}
@@ -109,10 +123,10 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 /* exchange */
 .price{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .price .figure{min-width:6ch}
-.seg{display:flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden;background:#fff}
+.seg{display:flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden;background:var(--card)}
 .seg button{flex:1;border:0;background:transparent;padding:7px 8px;cursor:pointer}
 .seg button+button{border-left:1px solid var(--rule)}
-.seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.seg button[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-ink)}
 .mode-desc{font-size:13px;color:var(--steel);margin:7px 0 0;min-height:2.6em}
 
 /* order book (separate programs only) */
@@ -123,14 +137,17 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 .bt td{padding:5px 6px;border-bottom:1px solid var(--rule-soft)}
 .bt td.r,.bt th.r{text-align:right}
 .bt tr.ask td:first-child{color:var(--red)} .bt tr.bid td:first-child{color:var(--pine)}
-.bt tr.mid td{background:#fff;font-weight:600;text-align:center}
+.bt tr.mid td{background:var(--card);font-weight:600;text-align:center}
+.bt tr.pick{cursor:pointer}
+.bt tr.pick:hover td{background:var(--slate-tint)}
+.btn.mini{padding:4px 9px;font-size:13px;align-self:center}
 @media (max-width:1100px){.bookp{grid-template-columns:1fr}}
 
 /* bottom */
 .lower{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:22px;padding:0 28px 40px}
 .log{list-style:none;margin:0;padding:0;max-height:560px;overflow:auto}
-.log li{border-left:3px solid var(--rule);padding:8px 12px 9px;margin-bottom:6px;background:#fff;border-radius:0 6px 6px 0}
-.log li.ok{border-color:var(--pine)} .log li.bad{border-color:var(--red);background:#FCF6F5}
+.log li{border-left:3px solid var(--rule);padding:8px 12px 9px;margin-bottom:6px;background:var(--card);border-radius:0 6px 6px 0}
+.log li.ok{border-color:var(--pine)} .log li.bad{border-color:var(--red);background:var(--bad-bg)}
 .log li.warn{border-color:var(--amber)} .log li.sign{border-color:var(--slate)}
 .log .t{font-weight:600;font-size:14.5px}
 .log li.bad .t{color:var(--red)}
@@ -142,7 +159,7 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 .txlist button[aria-current="true"]{background:var(--slate-tint)}
 .chip{font-size:12px;padding:2px 8px;border-radius:999px;white-space:nowrap}
 .chip.confirmed{background:var(--pine-tint);color:var(--pine)}
-.chip.mempool{background:var(--amber-tint);color:#7a4f08}
+.chip.mempool{background:var(--amber-tint);color:var(--amber-ink)}
 .chip.rejected{background:var(--red-tint);color:var(--red)}
 .io{width:100%;border-collapse:collapse;font-size:13.5px}
 .io td{padding:5px 0;border-bottom:1px solid var(--rule-soft);vertical-align:top}
@@ -166,11 +183,11 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 .start h2{font:600 20px/1.2 var(--display);margin:0;letter-spacing:.02em}
 .start .intro{margin:6px 0 14px;color:var(--steel);font-size:14px;max-width:95ch}
 .steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
-.steps li{border:1px solid var(--rule-soft);border-radius:8px;padding:10px 12px 12px;background:#fff}
+.steps li{border:1px solid var(--rule-soft);border-radius:8px;padding:10px 12px 12px;background:var(--card)}
 .steps li.now{border-color:var(--pine);box-shadow:0 0 0 1px var(--pine)}
 .steps h3{font:600 15px/1.25 var(--display);margin:0 0 4px;display:flex;align-items:center;gap:8px;letter-spacing:.01em}
 .steps .n{flex:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--rule-soft);font:600 12.5px var(--display)}
-.steps li.done .n{background:var(--pine);color:#fff}
+.steps li.done .n{background:var(--pine-btn);color:#fff}
 .steps li.done h3{color:var(--steel)}
 .steps p{margin:0;font-size:13px;color:var(--steel)}
 .steps .btn{margin-top:9px}
@@ -180,6 +197,9 @@ details pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;
 .gloss dt{font-weight:600}
 .gloss dd{margin:0;color:var(--steel)}
 .reopen{margin:12px 28px 0}
+.banner{margin:22px 28px 0;padding:12px 16px;border:1px solid var(--amber);background:var(--amber-tint);border-radius:10px;font-size:14px}
+.banner b{display:block;font:600 16px var(--display);margin-bottom:2px}
+@media (max-width:680px){.banner{margin:16px 16px 0}}
 .flash{animation:flash 1.8s ease-out}
 @keyframes flash{0%,45%{box-shadow:0 0 0 3px var(--amber)}100%{box-shadow:0 0 0 0 rgba(173,114,16,0)}}
 /* test tools: hidden until switched on at the top */
@@ -195,8 +215,8 @@ details.model p{margin:6px 0 0}
 .loading{height:6px;background:var(--rule-soft);border-radius:3px;overflow:hidden;margin-top:18px}
 .loading i{display:block;height:100%;width:30%;background:var(--pine);animation:slide 1.4s ease-in-out infinite}
 @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
-.toast{position:fixed;right:24px;bottom:24px;max-width:380px;background:var(--ink);color:#fff;padding:12px 16px;border-radius:8px;font-size:14px;z-index:20;box-shadow:0 6px 24px rgba(23,33,43,.25)}
-.toast.err{background:var(--red)}
+.toast{position:fixed;right:24px;bottom:24px;max-width:380px;background:var(--toast-bg);color:var(--toast-ink);padding:12px 16px;border-radius:8px;font-size:14px;z-index:20;box-shadow:0 6px 24px rgba(23,33,43,.25)}
+.toast.err{background:var(--red-strong);color:#fff}
 [hidden]{display:none!important}
 .busy{cursor:progress}
 
@@ -230,7 +250,7 @@ details.model p{margin:6px 0 0}
 .model{margin:14px 28px 0;font-size:14px;color:var(--steel)}
 .model b{color:var(--ink);font-weight:600}
 .missing-box{max-width:620px}
-.missing-box pre{background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:10px 12px;white-space:pre-wrap;word-break:normal;overflow-wrap:anywhere}
+.missing-box pre{background:var(--card);border:1px solid var(--rule-soft);border-radius:6px;padding:10px 12px;white-space:pre-wrap;word-break:normal;overflow-wrap:anywhere}
 .switch{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px}
 .switch input{width:18px;height:18px;accent-color:var(--pine)}
 .best{font-size:13.5px;margin-top:8px}
@@ -255,7 +275,7 @@ details.model p{margin:6px 0 0}
 .acct .total .v{color:var(--pine)}
 .acct .addcash{margin-top:3px;padding:2px 8px;font-size:12px}
 .acct .more{display:none}
-select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px;padding:7px 8px;background:#fff}
+select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px;padding:7px 8px;background:var(--card)}
 @media (max-width:900px){
   .acct{flex-direction:column;padding:0 12px}
   .acct .sums{order:-1;border-left:0;padding-left:0;border-bottom:1px solid var(--rule-soft);align-items:center}
@@ -287,9 +307,10 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
 </section>
 
 <div id="app" hidden>
+<div class="banner" id="exchDown" role="alert" hidden></div>
 <section class="start" id="start" aria-labelledby="s-h">
   <div class="start-head"><h2 id="s-h">Start here</h2><button class="link" id="startHide">Hide this guide</button></div>
-  <p class="intro">Castlekeep lets you trade on an exchange while your coins stay in a vault that needs your signature to move.
+  <p class="intro" id="startIntro">Castlekeep lets you trade on an exchange while your coins stay in a vault that needs your signature to move.
   If the exchange disappears or cheats, you can still take your coins back on your own after a waiting period.
   Everything here uses test coins with no value.</p>
   <ol class="steps" id="steps"></ol>
@@ -310,7 +331,8 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <p class="hint" id="walletPending"></p>
     <div id="recvBox" hidden>
       <p class="hint" style="margin:8px 0 4px" id="recvText">Your signet address. Get free signet coins from a public signet faucet (search "signet faucet") and send them here. They have no value.</p>
-      <p class="mono small" id="recvAddr" style="word-break:break-all;background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:6px 8px;margin:0;user-select:all"></p>
+      <div class="field"><p class="mono small" id="recvAddr" style="flex:1;min-width:0;word-break:break-all;background:var(--card);border:1px solid var(--rule-soft);border-radius:6px;padding:6px 8px;margin:0;user-select:all"></p>
+        <button class="btn mini" type="button" id="copyAddr" title="Copy the address, to paste into a faucet">Copy</button></div>
       <p class="small" id="recvLink" style="margin:4px 0 0"></p>
     </div>
     <button class="btn block" id="faucet" style="margin-top:12px">Get 1 test coin</button>
@@ -351,6 +373,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <div class="field" style="margin-top:10px">
       <input id="orderAmt" type="number" min="0" step="0.1" value="0.6" inputmode="decimal" aria-label="Amount">
       <span class="muted" style="align-self:center" id="orderUnit"></span>
+      <button class="btn mini" type="button" data-max="orderAmt" title="The most you can trade now">Max</button>
     </div>
     <p class="hint" id="orderEst"></p>
     <button class="btn primary block" id="order" style="margin-top:10px">Sign and sell</button>
@@ -362,8 +385,9 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <div class="field">
       <input id="swapAmt" type="number" min="0" step="0.01" value="0.04" inputmode="decimal" aria-label="Amount to swap">
       <span class="muted" style="align-self:center" id="swapUnit"></span>
-      <select id="swapTo" aria-label="Coin to buy"></select>
+      <button class="btn mini" type="button" data-max="swapAmt" title="All of your share of the vault">Max</button>
     </div>
+    <div class="field" style="margin-top:8px"><select id="swapTo" aria-label="Coin to buy" style="flex:1"></select></div>
     <p class="hint" id="swapEst"></p>
     <button class="btn primary block" id="swap" style="margin-top:10px">Sign and swap</button>
     <p class="hint" id="swapHint">The exchange signs the new state for the coin you buy first. Only then do you sign the sale, so you never give up one coin without already holding the other.</p>
@@ -407,7 +431,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <label for="lpPrice" style="margin-top:10px;display:block">Price per coin (USD)</label>
     <div class="field"><input id="lpPrice" type="number" min="1" step="1" inputmode="numeric"></div>
     <label for="lpAmt" style="margin-top:8px;display:block">Amount</label>
-    <div class="field"><input id="lpAmt" type="number" min="0" step="0.01" value="0.1" inputmode="decimal"><span class="muted" style="align-self:center" id="lpUnit"></span></div>
+    <div class="field"><input id="lpAmt" type="number" min="0" step="0.01" value="0.1" inputmode="decimal"><span class="muted" style="align-self:center" id="lpUnit"></span><button class="btn mini" type="button" data-max="lpAmt" title="The most you can still promise in orders">Max</button></div>
     <p class="hint" id="lpEst"></p>
     <button class="btn primary block" id="lpBtn" style="margin-top:8px">Place order</button>
     <p class="hint" id="lpHint">It matches the best opposite order first, at that order's price. Until it fills, the coins (or cash) it needs are set aside. Your wallet signs each fill only after checking it against this order: same coin and side, not more than you asked for, at your price or better.</p>
@@ -597,6 +621,8 @@ function renderStart() {
     ${s.done ? "" : `<p>${esc(s.text)}</p>`}
     ${!s.done && i === now && s.btn ? `<button class="btn ${s.btn[0].startsWith("show:") ? "" : "primary"}" data-step="${esc(s.btn[0])}">${esc(s.btn[1])}</button>` : ""}</li>`).join(""));
   const done = now < 0;
+  // All five done: the steps fold away, leaving the next idea.
+  $("steps").hidden = done; $("startIntro").hidden = done;
   $("startDone").hidden = !done;
   if (done) {
     setHTML("startDone", `That's the whole cycle: coins in, a trade, coins out. Next, see what happens when the exchange misbehaves:
@@ -714,14 +740,14 @@ function renderAccount() {
     const where = h.vaultSats > 0 ? ` · ${esc(coinOf(h.vaultSats, "", 4))}in vault` : "";
     return `<button class="cell" data-goto="${esc(h.chain)}"${here} title="${esc(h.name)} at ${usd(h.price)}: ${esc(coinOf(h.walletSats, h.ticker, 8))} in your wallet, ${esc(coinOf(h.vaultSats, h.ticker, 8))} yours in the vault. Go to ${esc(h.name)}.">
       <div class="k">${coinIcon(h.chain, 14)} ${esc(h.name)}</div><div class="v">${esc(coinOf(total, h.ticker, 4))}</div>
-      <div class="d">${usd(h.valueCents / 100)}${where}</div></button>`;
+      <div class="d">${h.price > 0 ? usd(h.valueCents / 100) : "no price yet"}${where}</div></button>`;
   }).join("");
   const html = `<div class="coins">${cells}</div>
     <div class="sums">
       <div class="cell" title="One cash balance for your whole account: money from selling one coin can be spent on another. The exchange holds this cash like any normal account; only the coins are self-custodied.">
         <div class="k">Cash on the exchange</div><div class="v">${usd(A.cashCents / 100)}</div>
         <button class="btn addcash" id="acctCash">+ $10,000 test cash</button></div>
-      <div class="cell total"><div class="k">Total (test dollars)</div><div class="v">${usd(A.totalCents / 100)}</div><div class="d">coins at today's prices, plus cash</div></div>
+      <div class="cell total"><div class="k">Total (test dollars)</div><div class="v">${A.holdings.some(h => h.ready && h.price <= 0) ? "–" : usd(A.totalCents / 100)}</div><div class="d">coins at today's prices, plus cash</div></div>
       <button class="btn more" id="acctMore" aria-expanded="${acctOpen}">${acctOpen ? "Hide coins" : "Show coins"}</button>
     </div>`;
   const el = $("acct");
@@ -783,6 +809,7 @@ function keepTyping(el, html) {
 // tradeWhy says why trading is off right now ("" when it's on).
 function tradeWhy() {
   const v = S.vault, c = S.chain;
+  if (S.exchangeDown) return "The exchange isn't answering, so trading waits until it's back.";
   if (!v || v.closeTxid) return `Lock some ${c.ticker} first (in the vault panel): you trade from your vault.`;
   if (v.status === "funding") return `Your deposit needs a block first: ${isPublic(c) ? blockWait(c) : "mine one with the buttons at the top"}.`;
   if (v.status !== "open") return "Trading has stopped on this vault while it's being exited.";
@@ -804,7 +831,7 @@ function renderSwap() {
     ? `You'd get about ${coinOf(Math.floor(amt * S.price / to.price * 1e8), to.ticker, 6)} (${usd(amt * S.price)}).`
     : (others.length ? "" : "Start another chain to swap into it.");
   const v = S.vault;
-  $("swap").disabled = busy || !to || !(v && v.status === "open");
+  $("swap").disabled = busy || !to || !!tradeWhy();
 }
 
 function renderTabs() {
@@ -867,13 +894,16 @@ function lockForm(c, title) {
   return `<div class="lockbox" id="lockBox">
       <label for="lockAmt">${title}</label>
       <div class="field"><input id="lockAmt" type="number" min="0.001" step="0.1" value="${esc(c.defaultLock)}" inputmode="decimal" aria-describedby="lockHint">
+        <button class="btn mini" type="button" data-max="lockAmt" title="All your wallet holds, less the network fee">Max</button>
         <button class="btn primary" id="lock" ${S.walletSats > 0 ? "" : "disabled"}>Lock ${esc(c.ticker)}</button></div>
       <p class="hint" id="lockHint">${hint}</p>
     </div>`;
 }
+// What's left to lock once the network fee is paid (gas on the EVM chains).
+const lockable = () => Math.max(0, S.walletSats - (S.chain.evm ? 1e6 : 3000));
 function bindLock() {
   if ($("lock")) $("lock").onclick = () => act({action: "lock", sats: Math.round((parseFloat($("lockAmt").value) || 0) * 1e8)});
-  capInput("lockAmt", S.walletSats);
+  capInput("lockAmt", lockable());
 }
 
 function renderVault() {
@@ -997,7 +1027,7 @@ function capacityBlock(v, c) {
     : `Ask the exchange to add its own ${esc(c.ticker)} to your vault so you can buy from it. You both sign one transaction that moves the vault and the exchange's coins into a bigger vault. You can ask again later for more.`;
   const wait = v.fundPending
     ? `<p class="hint" style="margin:8px 0 0;color:var(--ink)">The exchange's last deposit is waiting for a block. ${isPublic(c) ? "Once the next block comes" : "Mine one, and once it's in"}, the capacity is added and you can ask for more.</p>` : "";
-  return info + `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:#fff">
+  return info + `<div style="margin-top:14px;padding:12px 14px;border:1px dashed var(--rule);border-radius:8px;background:var(--card)">
       <label for="capAmt" style="color:var(--ink);font-weight:600">${v.exchDeposit > 0 || v.fundPending ? "Add more buying capacity" : "Buy more than you sell"}</label>
       <p class="hint" style="margin:0 0 8px">${how} Up to 5 ${esc(c.ticker)} per request. Fee: 0.2% of the amount, taken from your share.</p>
       <div class="field"><input id="capAmt" type="number" min="0.001" max="5" step="0.5" value="${esc(c.defaultLock)}" inputmode="decimal" aria-label="Buying capacity in ${esc(c.ticker)}">
@@ -1034,7 +1064,7 @@ function renderTxs() {
     ${t.error ? `<div class="err">${esc(t.error)}</div>` : ""}
     <dl><dt>${eth ? "Transaction" : "Transaction ID"}</dt><dd class="mono">${esc(t.txid.startsWith("not-sent") ? "Never sent: the simulation was refused" : t.txid)}</dd>
     <dt>${eth ? "Contract call" : "Unlocked by"}</dt><dd>${esc(t.path)}</dd></dl>
-    ${t.script ? `<p class="small muted" style="margin:12px 0 4px">${eth ? "Rules checked" : "Script used"}</p><pre class="mono" style="background:#fff;border:1px solid var(--rule-soft);border-radius:6px;padding:8px;white-space:pre-wrap;margin:0">${esc(t.script)}</pre>` : ""}
+    ${t.script ? `<p class="small muted" style="margin:12px 0 4px">${eth ? "Rules checked" : "Script used"}</p><pre class="mono" style="background:var(--card);border:1px solid var(--rule-soft);border-radius:6px;padding:8px;white-space:pre-wrap;margin:0">${esc(t.script)}</pre>` : ""}
     ${t.inputs && t.inputs.length ? `<p class="small muted" style="margin:14px 0 2px">${eth ? "From" : "Spends"}</p><table class="io">${ioRows(t.inputs)}</table>` : ""}
     ${t.outputs && t.outputs.length ? `<p class="small muted" style="margin:14px 0 2px">${eth ? "Pays" : "Creates"}</p><table class="io">${ioRows(t.outputs)}</table>` : ""}`;
 }
@@ -1108,7 +1138,12 @@ function render() {
   $("recvAddr").textContent = S.receiveAddr || "";
   $("recvLink").innerHTML = c.explorer && S.receiveAddr
     ? `<a href="${esc(c.explorer)}/address/${esc(S.receiveAddr)}" target="_blank" rel="noopener">See this address and its transactions on the block explorer</a>` : "";
-  $("price").textContent = usd(S.price);
+  $("price").textContent = S.exchangeDown ? "–" : usd(S.price);
+  // The exchange not answering (separate programs): say so, and what still works.
+  $("exchDown").hidden = !S.exchangeDown;
+  if (S.exchangeDown) setHTML("exchDown", `<b>The exchange isn't answering</b>${esc(S.exchangeDown)}
+    ${/127\.0\.0\.1|localhost/.test(S.exchangeDown) ? " If it runs on this computer, is its window still open?" : ""}
+    Your coins stay in your vault either way: trading waits until it's back, and if it stays away you can request an exit and take them back after the exit window.`);
   $("exchWallet").textContent = (S.exchWalletSats > 0 ? "+" : S.exchWalletSats < 0 ? "−" : "") + coin(Math.abs(S.exchWalletSats));
   document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === S.mode)));
   $("modeDesc").textContent = modeText[S.mode];
@@ -1135,7 +1170,7 @@ function render() {
     : "You sign the new vault state before the order is sent, so a filled trade can't be undone.");
   $("orderHint").classList.toggle("why", !!why);
   if (!busy) {
-    $("order").disabled = !(v && v.status === "open");
+    $("order").disabled = !!tradeWhy();
     $("steal").disabled = !v || v.status === "closed" || v.status === "closing";
   }
   renderSwap();
@@ -1157,7 +1192,10 @@ function renderBook() {
   if (!b) return;
   if (lpChain !== c.id) { lpChain = c.id; $("lpPrice").value = b.Price || S.price; $("lpUnit").textContent = c.ticker; }
   const asks = (b.Asks || []).slice().reverse(), bids = b.Bids || [];
-  const row = (cls, l) => `<tr class="${cls}"><td>${usd(l.Price)}</td><td class="r">${esc(coin(l.Sats, 6))}</td><td class="r">${usd(l.Price * l.Sats / 1e8)}</td></tr>`;
+  const row = (cls, l) => {
+    const s = cls === "ask" ? "buy" : "sell";
+    return `<tr class="${cls} pick" data-bookprice="${l.Price}" data-bookside="${s}" title="${s === "buy" ? "Buy from this seller" : "Sell to this buyer"} at ${usd(l.Price)}: fills in a limit order"><td>${usd(l.Price)}</td><td class="r">${esc(coin(l.Sats, 6))}</td><td class="r">${usd(l.Price * l.Sats / 1e8)}</td></tr>`;
+  };
   setHTML("bookTable", `<tr><th>Price</th><th class="r">Amount</th><th class="r">Total</th></tr>` +
     (asks.length ? asks.map(l => row("ask", l)).join("") : `<tr><td colspan="3" class="muted small">No sell orders</td></tr>`) +
     `<tr class="mid"><td colspan="3">Last price ${usd(b.Price)}</td></tr>` +
@@ -1183,7 +1221,7 @@ function renderBook() {
   const p = parseFloat($("lpPrice").value) || 0, a = parseFloat($("lpAmt").value) || 0;
   $("lpEst").textContent = p > 0 && a > 0 ? (bside === "sell" ? `You'd receive ${usd(p * a)} if it all fills.` : `It would cost up to ${usd(p * a)} of cash.`) : "";
   $("lpBtn").textContent = bside === "sell" ? `Place sell order` : `Place buy order`;
-  if (!busy) $("lpBtn").disabled = !(S.vault && S.vault.status === "open");
+  if (!busy) $("lpBtn").disabled = !!tradeWhy();
   const why = tradeWhy();
   $("lpHint").textContent = why || lpHintText;
   $("lpHint").classList.toggle("why", !!why);
@@ -1217,6 +1255,33 @@ $("tabs").addEventListener("keydown", e => {
   setTimeout(() => { const t = document.querySelector(`[data-chain="${next}"]`); if (t) t.focus(); }, 0);
 });
 $("toast").onclick = () => $("toast").hidden = true;
+$("copyAddr").onclick = async () => {
+  const a = $("recvAddr").textContent;
+  try { await navigator.clipboard.writeText(a); toast("Address copied. Paste it into the faucet."); }
+  catch (e) { // no clipboard: select it for Ctrl+C
+    const r = document.createRange(); r.selectNodeContents($("recvAddr"));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    toast("Press Ctrl+C to copy the selected address.");
+  }
+};
+// Max fills an amount box with the most it takes (capInput keeps that in .max).
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-max]");
+  const el = b && $(b.dataset.max);
+  if (!el || el.max === "") return;
+  el.value = el.max; el.dispatchEvent(new Event("input")); el.focus();
+});
+// A price in the order book: a limit order against it (buy from a seller,
+// sell to a buyer) at that price.
+$("bookTable").addEventListener("click", e => {
+  const r = e.target.closest("[data-bookprice]");
+  if (!r) return;
+  const s = r.dataset.bookside;
+  document.querySelector(`[data-bside="${s}"]`).click();
+  $("lpPrice").value = r.dataset.bookprice;
+  $("lpPrice").dispatchEvent(new Event("input"));
+  $("lpAmt").focus();
+});
 $("setPrice").onclick = () => { const v = parseInt($("priceInput").value, 10); if (v) act({action: "price", usd: v}); };
 $("priceInput").onkeydown = e => { if (e.key === "Enter") $("setPrice").click(); };
 $("faucet").onclick = () => act({action: "faucet"});

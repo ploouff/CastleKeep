@@ -8,6 +8,9 @@
 <style>
 :root{--paper:#E8ECF0;--panel:#F6F8F9;--ink:#17212B;--steel:#55636F;--rule:#C3CCD5;--pine:#2D5D4C;--red:#A3322A;
   --display:"Bahnschrift","DIN Alternate","Roboto Condensed","Arial Narrow",sans-serif;--body:"Segoe UI",system-ui,Arial,sans-serif;--mono:"Cascadia Mono",Consolas,monospace}
+:root{--card:#fff;--sel-bg:#17212B;--sel-ink:#fff;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--paper:#11171D;--panel:#182028;--ink:#E3E8ED;--steel:#9BA8B4;--rule:#34414D;--pine:#5BAA8C;--red:#E26F64;--amber:#D69D3E;--card:#1F2830;--sel-bg:#E3E8ED;--sel-ink:#11171D}}
+a{color:#93AFD0}
 *{box-sizing:border-box}
 html{background:var(--paper)}
 body{margin:0;font:15px/1.5 var(--body);color:var(--ink);font-variant-numeric:tabular-nums}

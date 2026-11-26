@@ -907,7 +907,7 @@ func (e *walletEngine) Snapshot() Snapshot {
 	if err := e.w.look("/v1/info", InfoReq{e.id}, &info); err == nil {
 		s.Price, s.Mode = info.Price, info.Mode
 	} else {
-		s.Mode = "offline"
+		s.ExchDown = exchDown(err, e.exch)
 	}
 	var cr CashResp
 	if e.w.look("/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {

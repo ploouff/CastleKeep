@@ -217,7 +217,9 @@ go run . wallet -name bob -port 9301
 
 Each wallet page then has an **Order book** panel under the Exchange panel: the open sell
 orders (asks) and buy orders (bids) from every wallet, your own orders with a Cancel
-button, recent trades, and a form for a limit order (side, price per coin, amount).
+button, recent trades, and a form for a limit order (side, price per coin, amount). Pick a
+price in the book to fill in an order against it (buy from a seller, or sell to a buyer, at
+that price); **Max** fills in the most you can still promise.
 
 - Orders match best price first, then oldest first. The trade happens at the price of the
   order that was already waiting, and that price becomes the coin's price.
@@ -454,8 +456,8 @@ EVM chains. Their coins have no value and come from public faucets.
 | **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on the EVM chains they mine one block or skip the clock ahead an hour or a day. (None on the public test networks: blocks come by themselves.) |
 | **Your wallet** | Test coins only you control, and the faucet. On the EVM chains, gas fees come out of this. Under **Your protection**: your watchtower's switch and, with a separate watchtower, what it holds for you. |
 | **Vault** | With no vault, the box to lock coins into one. Then: who owns what now (the latest split you both signed), the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. Once closed, the box to open the next one. |
-| **Exchange** | **Trade now, at the exchange's price** (sell or buy), and swap into another coin. When trading is off, it says why. |
-| **Messages** | Each button shows it's working while you wait, and the result appears in the bottom-right corner (red if something was refused). Enter in an amount box presses its button. |
+| **Exchange** | **Trade now, at the exchange's price** (sell or buy), and swap into another coin. When trading is off, it says why. **Max** fills in the most you can trade or swap. |
+| **Messages** | Each button shows it's working while you wait, and the result appears in the bottom-right corner (red if something was refused). Enter in an amount box presses its button. If the exchange can't be reached at all, a banner says so (and that your coins stay in your vault). The pages follow your computer's dark or light setting. |
 | **Activity and Transaction inspector** | Everything that happened, and the exact rule that accepted or refused each transaction. |
 
 ## Things to try

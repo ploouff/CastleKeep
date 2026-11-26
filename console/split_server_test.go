@@ -109,3 +109,14 @@ func TestStartHelpers(t *testing.T) {
 		t.Fatal("underStart without CASTLEKEEP_START")
 	}
 }
+
+// The page's banner when the exchange doesn't answer: where it was looked
+// for, or the exchange's own refusal.
+func TestExchangeDownMessage(t *testing.T) {
+	if got := exchDown(userErr("Couldn't reach the exchange: dial tcp 127.0.0.1:9200: refused"), "http://127.0.0.1:9200"); got != "Can't reach the exchange at http://127.0.0.1:9200." {
+		t.Fatalf("unreachable: %q", got)
+	}
+	if got := exchDown(userErr("The exchange said: Too many requests from your wallet."), "x"); got != "The exchange said: Too many requests from your wallet." {
+		t.Fatalf("a refusal: %q", got)
+	}
+}

@@ -310,6 +310,12 @@ On the wallet page (any of the ways above):
 - Settle and mine: the closed vault shows the box to open the next one.
 - Switch on **Test tools**, set the exchange to Offline and press **Settle with the exchange**:
   the message is red and says why.
+- **Max** next to an amount fills in the most you can use: your share to sell or swap, your
+  wallet less the network fee to lock. In the order book, pick a price: the limit order form
+  switches side and fills in that price.
+- Stop the exchange (Ctrl+C in its window) with a wallet page open: a banner says the
+  exchange isn't answering and trading waits. Start it again: the banner goes away.
+- Switch Windows to dark mode (Settings, Personalization, Colors): all three pages follow.
 
 ## What a failure looks like
 

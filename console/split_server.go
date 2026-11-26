@@ -73,3 +73,12 @@ func (w *Wallet) SetServer(server string) {
 	w.server = server
 	w.save()
 }
+
+// exchDown says, for the page, why the exchange didn't answer: unreachable
+// (with its address), or its own refusal.
+func exchDown(err error, addr string) string {
+	if strings.Contains(err.Error(), "Couldn't reach") {
+		return "Can't reach the exchange at " + addr + "."
+	}
+	return err.Error()
+}
