@@ -247,6 +247,30 @@ By hand:
 6. Close the watchtower window, then try to sell: the trade is stopped with "Your watchtower
    couldn't be reached", and nothing was handed over. Start the watchtower again to carry on.
 
+## K. Shared mode (a server friends use)
+
+`go test -run Shared -v` checks the following:
+- A shared exchange refuses unsigned requests, another wallet's vaults and cash, an account
+  name used with a different key, a replayed request, a request more than 5 minutes old, and
+  a request changed after signing.
+- Modes, prices and the admin data need the admin token, and it and the account keys are kept
+  across restarts.
+- On Ethereum, nobody else can register your vault's number.
+- The gateway passes on only the allowed node calls, and the faucet only answers programs on
+  the same computer.
+- A wallet that reaches the chain only through the gateway can lock, trade and settle.
+- A shared watchtower's page needs the token.
+
+By hand on your own PC (no server needed), with the public test networks:
+
+1. `go run . chains -network testnets -coins eth -shared`
+2. `go run . exchange -shared`: it prints the admin page's address with `?token=...`. Open it
+   without the token: the page shows "Only the operator…". With the token it works.
+3. `go run . wallet -name alice`. Its page works as usual; with **Test tools** on, switching
+   the exchange to Offline is refused ("Only the operator…").
+
+For a real server, follow [SERVER.md](SERVER.md).
+
 ## What a failure looks like
 
 - Automatic tests: a `--- FAIL` line with the expected and actual values.

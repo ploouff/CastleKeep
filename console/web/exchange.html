@@ -64,10 +64,14 @@ function coinIcon(c, size) {
 let byChain = {};
 const tick = id => (byChain[id] && byChain[id].Ticker) || id.toUpperCase();
 const label = id => (byChain[id] ? `${coinIcon(byChain[id], 16)} ${esc(byChain[id].Name || tick(id))}` : esc(tick(id)));
+// On a shared server the page's address carries the operator's token
+// (?token=...), and the page may sit under a path (/exchange/), so the
+// requests go relative to it.
+const adminToken = new URLSearchParams(location.search).get("token") || "";
 async function post(path, body) {
-  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  const r = await fetch(path.replace(/^\//, ""), {method: "POST", headers: {"Content-Type": "application/json", "X-Castlekeep-Admin": adminToken}, body: JSON.stringify(body || {})});
   const j = await r.json();
-  if (!r.ok) throw new Error(j.Error || r.statusText);
+  if (!r.ok) { const e = new Error(j.Error || r.statusText); e.answered = true; throw e; }
   return j;
 }
 let editing = false;
@@ -105,7 +109,10 @@ async function refresh() {
         <table><thead><tr><th>#</th><th>Account</th><th>Side</th><th>Price</th><th>Left</th></tr></thead><tbody>${orders}</tbody></table>
         <table style="margin-top:10px"><thead><tr><th>Trade time</th><th>Price</th><th>Amount</th></tr></thead><tbody>${trades}</tbody></table></div>`;
     }).join("") || `<p class="muted">No orders yet. Place one from a wallet page.</p>`;
-  } catch (e) { $("err").textContent = "Lost contact with the exchange server: " + e.message; }
+  } catch (e) {
+    $("err").textContent = !e.answered ? "Lost contact with the exchange server: " + e.message
+      : e.message + (adminToken ? "" : " Open this page with the address the exchange printed when it started (it ends in ?token=…).");
+  }
 }
 document.addEventListener("click", async e => {
   const b = e.target.closest("button");

@@ -193,7 +193,7 @@ func (w *Wallet) Swap(from, to string, sats int64) error {
 	var prices [2]int64
 	for i, c := range []string{from, to} {
 		var info InfoResp
-		if err := call(w.base, "/v1/info", InfoReq{c}, &info); err != nil {
+		if err := w.call("/v1/info", InfoReq{c}, &info); err != nil {
 			return err
 		}
 		prices[i] = info.Price
@@ -234,7 +234,7 @@ func (w *Wallet) Swap(from, to string, sats int64) error {
 		return err
 	}
 	var r SwapResp
-	if err := call(w.base, "/v1/swap", SwapReq{w.Account, sf.leg, st.leg, sats}, &r); err != nil {
+	if err := w.call("/v1/swap", SwapReq{w.Account, sf.leg, st.leg, sats}, &r); err != nil {
 		return err
 	}
 	// The prices must be the ones the exchange is showing, and the amounts

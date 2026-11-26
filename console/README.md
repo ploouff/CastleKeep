@@ -292,6 +292,22 @@ higher fee, and miners take both together.
 
 The one-program console still uses a flat fee: there you mine the blocks yourself.
 
+### On a server, for friends (shared mode)
+
+To let other people try it from their own computers, the chains program, the exchange and
+the watchtower run on a small rented server with `-shared`, behind a web server that adds
+HTTPS, and each person runs only their wallet with the server's addresses:
+
+```
+go run . wallet -name bob -chains https://YOUR.SERVER/chains -exchange https://YOUR.SERVER/exchange -watchtower https://YOUR.SERVER/tower
+```
+
+With `-shared`, every request a wallet sends is signed with its own account key and may only
+touch its own account and vaults; changing modes or prices and the admin pages need the
+operator's token; and wallets read the Bitcoin chain through a gateway that passes on only
+the few calls they use. It works with the public test networks (`-network testnets`), not the
+private chains. Step by step, from renting the server to what friends type: [SERVER.md](../SERVER.md).
+
 ### A separate watchtower (keeps watching while your wallet is closed)
 
 Your wallet's own watchtower only works while the wallet program runs. On Bitcoin, if the
@@ -460,6 +476,7 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `split_eth.go`, `split_apps_eth.go` | The EVM chains in the separate programs |
 | `split_swap.go` | Swaps in the separate programs |
 | `split_tower.go`, `web/tower.html` | The separate watchtower program and its page, and the wallet's side of it |
+| `split_shared.go` | Shared mode for a server: signed requests, ownership checks, the admin token, EVM vault claims, the chains gateway (see `../SERVER.md`) |
 
 ## Known limits
 

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -28,9 +29,20 @@ type chainConn struct {
 	tagged string // cached tag()
 }
 
+// dialChain connects to a node's RPC: host:port for a node on this computer,
+// or a web address (http:// or https://) for a shared server's gateway
+// (split_shared.go), which passes on only the calls the programs need.
 func dialChain(addr string) (*chainConn, error) {
-	c, err := rpcclient.New(&rpcclient.ConnConfig{Host: addr, User: "castlekeep", Pass: "castlekeep",
-		HTTPPostMode: true, DisableTLS: true}, nil)
+	host, plain := addr, true
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		u, err := url.Parse(addr)
+		if err != nil {
+			return nil, err
+		}
+		host, plain = u.Host+u.Path, u.Scheme == "http"
+	}
+	c, err := rpcclient.New(&rpcclient.ConnConfig{Host: host, User: "castlekeep", Pass: "castlekeep",
+		HTTPPostMode: true, DisableTLS: plain}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -236,11 +248,27 @@ func call(base, path string, req, resp any) error {
 
 // callAs is call for any of the programs; who names it in error messages.
 func callAs(who string, client *http.Client, base, path string, req, resp any) error {
+	return callHeaders(who, client, base, path, req, resp, nil)
+}
+
+// callHeaders is callAs with extra headers made from the request (the
+// wallet's signature on a shared exchange, split_shared.go).
+func callHeaders(who string, client *http.Client, base, path string, req, resp any, headers func(path string, body []byte) map[string]string) error {
 	b, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
-	r, err := client.Post(base+path, "application/json", bytes.NewReader(b))
+	hr, err := http.NewRequest(http.MethodPost, base+path, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	hr.Header.Set("Content-Type", "application/json")
+	if headers != nil {
+		for k, v := range headers(path, b) {
+			hr.Header.Set(k, v)
+		}
+	}
+	r, err := client.Do(hr)
 	if err != nil {
 		return userErr("Couldn't reach %s: %v", who, err)
 	}

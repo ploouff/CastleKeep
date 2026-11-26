@@ -35,6 +35,7 @@ type EthChainReq struct{ Chain string } // empty: Ethereum
 type EthOpenReq struct {
 	Account, VaultID string
 	Chain            string
+	Claim            []byte `json:",omitempty"` // the vault owner's EVM signature on claimDigest (split_shared.go)
 }
 type EthStateOffer struct {
 	VaultID            string
@@ -216,6 +217,13 @@ func (x *Exchange) ethOpen(r EthOpenReq) (EthStateOffer, error) {
 	}
 	if !strings.EqualFold(cv.exchange, xe.addr) || cv.exitDelay != xe.delay || cv.closed || cv.exitStart != 0 {
 		return EthStateOffer{}, userErr("That vault isn't set up with this exchange's address and exit delay.")
+	}
+	// The vault's owner must sign for this account, so nobody else can register
+	// the vault's number first (required on a shared exchange).
+	if x.shared || len(r.Claim) > 0 {
+		if !strings.EqualFold(recoverAddr(claimDigest(xe.c.chainID, xe.c.contract, r.VaultID, r.Account), r.Claim), cv.user) {
+			return EthStateOffer{}, userErr("That vault isn't yours: its owner's signature for your account is missing.")
+		}
 	}
 	st := &ethState{Index: 0, Label: "Opening balance", UserSats: cv.amount}
 	v := &xEthVault{id: id, account: r.Account, user: cv.user, exchLast: -1}
@@ -561,7 +569,7 @@ func (w *Wallet) EthOpen(chain string, sats int64) error {
 		}
 	}
 	var info EthInfoResp
-	if err := call(w.base, "/v1/eth/info", EthChainReq{we.id}, &info); err != nil {
+	if err := w.call("/v1/eth/info", EthChainReq{we.id}, &info); err != nil {
 		return err
 	}
 	if info.ExitDelay != we.delay {
@@ -592,7 +600,7 @@ func (w *Wallet) ethAgree(we *wEth, v *wEthVault, off EthStateOffer, wantUser, t
 	d := we.c.stateDigest(v.id, int64(off.Nonce), off.UserSats)
 	sig := signDigest(we.key, d)
 	var cr EthCommitResp
-	if err := call(w.base, "/v1/eth/commit", EthCommitReq{off.VaultID, off.Nonce, sig, we.id}, &cr); err != nil {
+	if err := w.call("/v1/eth/commit", EthCommitReq{off.VaultID, off.Nonce, sig, we.id}, &cr); err != nil {
 		return err
 	}
 	if !strings.EqualFold(recoverAddr(d, cr.ExchSig), we.exchAddr) {
@@ -628,7 +636,8 @@ func (w *Wallet) ethRegister(we *wEth, v *wEthVault) {
 		return
 	}
 	var off EthStateOffer
-	if call(w.base, "/v1/eth/open", EthOpenReq{w.Account, v.id.String(), we.id}, &off) != nil {
+	claim := signDigest(we.key, claimDigest(we.c.chainID, we.c.contract, v.id.String(), w.Account))
+	if w.call("/v1/eth/open", EthOpenReq{w.Account, v.id.String(), we.id, claim}, &off) != nil {
 		return
 	}
 	w.ethAgree(we, v, off, cv.amount, cv.amount)
@@ -653,7 +662,7 @@ func (w *Wallet) EthOrder(chain, side string, sats int64) error {
 		return userErr("Not trading: %s", v.exchFault)
 	}
 	var off EthStateOffer
-	if err := call(w.base, "/v1/eth/order", EthOrderReq{v.id.String(), side, sats, we.id}, &off); err != nil {
+	if err := w.call("/v1/eth/order", EthOrderReq{v.id.String(), side, sats, we.id}, &off); err != nil {
 		return err
 	}
 	want := v.latest().UserSats - sats
@@ -673,7 +682,7 @@ func (w *Wallet) EthCapacity(chain string, sats int64) error {
 	if v.capPending {
 		return userErr("The exchange's last deposit is still waiting for a block. Once it's in, you can ask for more.")
 	}
-	if err := call(w.base, "/v1/eth/capacity", EthCapacityReq{v.id.String(), sats, we.id}, nil); err != nil {
+	if err := w.call("/v1/eth/capacity", EthCapacityReq{v.id.String(), sats, we.id}, nil); err != nil {
 		return err
 	}
 	v.capPending, v.capSats = true, sats
@@ -688,7 +697,7 @@ func (w *Wallet) ethCapacityAgree(we *wEth, v *wEthVault) {
 		return
 	}
 	var off EthStateOffer
-	if call(w.base, "/v1/eth/capacity/offer", EthOpenReq{w.Account, v.id.String(), we.id}, &off) != nil {
+	if w.call("/v1/eth/capacity/offer", EthOpenReq{Account: w.Account, VaultID: v.id.String(), Chain: we.id}, &off) != nil {
 		return
 	}
 	cv, err := we.c.readVaultID(v.id)
@@ -717,7 +726,7 @@ func (w *Wallet) EthSettle(chain string) error {
 	d := we.c.settleDigest(v.id, int64(l.Index), l.UserSats)
 	us := signDigest(we.key, d)
 	var sr EthSettleResp
-	if err := call(w.base, "/v1/eth/settle", EthSettleReq{v.id.String(), us, we.id}, &sr); err != nil {
+	if err := w.call("/v1/eth/settle", EthSettleReq{v.id.String(), us, we.id}, &sr); err != nil {
 		return err
 	}
 	if !strings.EqualFold(recoverAddr(d, sr.ExchSig), we.exchAddr) {

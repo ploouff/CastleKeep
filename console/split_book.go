@@ -382,7 +382,7 @@ func (w *Wallet) PlaceOrder(chain, side string, price, sats int64) (int, error) 
 		return 0, err
 	}
 	var r PlaceResp
-	if err := call(w.base, "/v1/book/place", PlaceReq{w.Account, chain, id, side, price, sats}, &r); err != nil {
+	if err := w.call("/v1/book/place", PlaceReq{w.Account, chain, id, side, price, sats}, &r); err != nil {
 		return 0, err
 	}
 	if w.orders == nil {
@@ -393,12 +393,12 @@ func (w *Wallet) PlaceOrder(chain, side string, price, sats int64) (int, error) 
 }
 
 func (w *Wallet) CancelOrder(id int) error {
-	return call(w.base, "/v1/book/cancel", CancelReq{w.Account, id}, nil)
+	return w.call("/v1/book/cancel", CancelReq{w.Account, id}, nil)
 }
 
 func (w *Wallet) Book(chain string) (BookResp, error) {
 	var r BookResp
-	err := call(w.base, "/v1/book", BookReq{chain, w.Account}, &r)
+	err := w.call("/v1/book", BookReq{chain, w.Account}, &r)
 	return r, err
 }
 
@@ -423,7 +423,7 @@ func (w *Wallet) signFills(chain string) error {
 			us, uh = newSecret()
 		}
 		var f FillOffer
-		if err := call(w.base, "/v1/fills/next", FillReq{w.Account, chain, uh}, &f); err != nil {
+		if err := w.call("/v1/fills/next", FillReq{w.Account, chain, uh}, &f); err != nil {
 			return err
 		}
 		if f.Leg == nil {
