@@ -238,7 +238,9 @@ exit
 systemctl restart castlekeep-chains castlekeep-exchange castlekeep-watchtower
 ```
 
-Everything is kept between restarts (in `/home/castlekeep/castlekeep-data`).
+Everything is kept between restarts (in `/home/castlekeep/castlekeep-data`; the exchange's and
+watchtower's files are in its `testnets` folder, since the server runs the public test
+networks).
 
 ## What shared mode does, and what it doesn't
 

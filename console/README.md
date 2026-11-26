@@ -236,6 +236,11 @@ them and carry on later:
   states and secrets, cash balances, prices and the order books.
 - `wallet-alice.json` (one per wallet name) holds your keys, revocation secrets, vaults
   and orders.
+- `testnets\` holds the same files for the public test networks (chains started with
+  `-network signet` or `testnets`), so switching between them and the private test chains
+  doesn't mix them up. A file made on the public test networks that is still in
+  `castlekeep-data` itself (from before this folder existed) is moved into `testnets\` the
+  first time a program needs it, and says so.
 
 These files hold private keys in plain text. That's fine for test coins only.
 

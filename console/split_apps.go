@@ -464,7 +464,7 @@ func runExchange(args []string) {
 			}
 		}
 	}
-	file := filepath.Join(*data, "exchange.json")
+	file := netFile(*data, "exchange.json", onPublic(cfgs, eps))
 	loaded := startSealed(file, "the exchange's file", *fresh, *protect, *unprotect, func(k *sealKey) { x.seal = k }, x.Load)
 	for id, xc := range x.chains {
 		if xc.cfg.Network == "signet" {
@@ -562,7 +562,7 @@ func runWatchtower(args []string) {
 			t.AttachEVM(c.ID, *ep)
 		}
 	}
-	file := filepath.Join(*data, "watchtower.json")
+	file := netFile(*data, "watchtower.json", onPublic(cfgs, eps))
 	startFile(file, *fresh, t.Load)
 	t.SaveTo(file)
 	pageQuery := ""
@@ -655,7 +655,7 @@ func runWallet(args []string) {
 			}
 		}
 	}
-	file := filepath.Join(*data, walletFile(*name))
+	file := netFile(*data, walletFile(*name), onPublic(cfgs, eps))
 	loaded := startSealed(file, "your wallet", *fresh, *protect, *unprotect, func(k *sealKey) { w.seal = k }, w.Load)
 	if !loaded {
 		w.SetName(*name)
