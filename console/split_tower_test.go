@@ -166,6 +166,33 @@ func runTower(t *testing.T, chain string) {
 	})
 }
 
+// A wallet with no vault yet signs up on its first tick, and the page says so
+// (it used to only ask for its status, which a new watchtower refused).
+func TestTowerSignsUpNewWallet(t *testing.T) {
+	s := newSplit(t, "btc")
+	tw, srv := s.withTower()
+	s.w.Tick()
+	if s.w.towerErr != "" || s.w.towerStat == nil {
+		t.Fatalf("not signed up: %q", s.w.towerErr)
+	}
+	if len(tw.View().Wallets) != 1 {
+		t.Fatal("the watchtower doesn't list the wallet")
+	}
+	if note := s.w.towerNote("btc"); !strings.Contains(note, "nothing to watch") {
+		t.Fatalf("page note: %q", note)
+	}
+	// Down: the page says it can't be reached. Refused: it says so instead.
+	srv.Close()
+	s.w.towerSend(true)
+	if note := s.w.towerNote("btc"); !strings.Contains(note, "can't be reached") {
+		t.Fatalf("page note while down: %q", note)
+	}
+	s.w.towerErr = "The watchtower said: Wrong token for this wallet"
+	if note := s.w.towerNote("btc"); !strings.Contains(note, "refused the last update") {
+		t.Fatalf("page note after a refusal: %q", note)
+	}
+}
+
 // The watchtower never goes back to an older state, and only takes updates
 // from the wallet that signed up with it.
 func TestTowerRules(t *testing.T) {

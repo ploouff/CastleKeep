@@ -295,15 +295,17 @@ type bookRec struct {
 }
 
 type xSave struct {
-	Version   int
-	Chains    map[string]xChainRec
-	Vaults    []xVaultRec
-	Cash      map[string]int64
-	EVM       map[string]*xEthRec // eth, pol, base, bnb, avax
-	Eth       *xEthRec            // files saved before the other EVM chains: Ethereum only
-	EthVaults []xEthVaultRec
-	Books     map[string]bookRec
-	OrderSeq  int
+	Version    int
+	Chains     map[string]xChainRec
+	Vaults     []xVaultRec
+	Cash       map[string]int64
+	EVM        map[string]*xEthRec // eth, pol, base, bnb, avax
+	Eth        *xEthRec            // files saved before the other EVM chains: Ethereum only
+	EthVaults  []xEthVaultRec
+	Books      map[string]bookRec
+	OrderSeq   int
+	Accounts   map[string]string `json:",omitempty"` // shared mode: each account's key (split_shared.go)
+	AdminToken string            `json:",omitempty"` // shared mode: the operator's token
 }
 
 // SaveTo makes the exchange save itself to path after every change.
@@ -342,6 +344,10 @@ func (x *Exchange) save() {
 func (x *Exchange) record() xSave {
 	s := xSave{Version: saveVersion, Chains: map[string]xChainRec{}, Cash: x.cash, Books: map[string]bookRec{}, OrderSeq: x.orderSeq,
 		Vaults: []xVaultRec{}, EthVaults: []xEthVaultRec{}}
+	if len(x.acctKeys) > 0 {
+		s.Accounts = x.acctKeys
+	}
+	s.AdminToken = x.adminToken
 	for id, xc := range x.chains {
 		s.Chains[id] = xChainRec{xc.c.tag(), keyRec(xc.key), utxoRecs(xc.coins), xc.price, xc.mode}
 	}
@@ -518,6 +524,12 @@ func (x *Exchange) Load(path string) (bool, error) {
 		x.books[chain] = b
 	}
 	x.orderSeq = s.OrderSeq
+	for a, k := range s.Accounts {
+		x.acctKeys[a] = k
+	}
+	if s.AdminToken != "" {
+		x.adminToken = s.AdminToken
+	}
 	return true, nil
 }
 
@@ -577,6 +589,7 @@ type wSave struct {
 	Eth           *wEthRec            // files saved before the other EVM chains: Ethereum only
 	Orders        []wOrder
 	Tower         *wTowerRec `json:",omitempty"` // a separate watchtower in use (split_tower.go)
+	AcctKey       keyHex     `json:",omitempty"` // signs requests to the exchange (split_shared.go)
 }
 
 // SaveTo makes the wallet save itself to path after every change.
@@ -623,6 +636,7 @@ func (w *Wallet) record() wSave {
 	if w.tower != "" {
 		s.Tower = &wTowerRec{w.tower, w.towerToken}
 	}
+	s.AcctKey = keyRec(w.acctKey)
 	for id, wc := range w.chains {
 		cr := wChainRec{Tag: wc.c.tag(), Key: keyRec(wc.key), Coins: utxoRecs(wc.coins)}
 		if v := wc.vault; v != nil {
@@ -687,6 +701,13 @@ func (w *Wallet) Load(path string) (bool, error) {
 	w.Account, w.Name, w.WT = s.Account, s.Name, s.WT
 	if s.Tower != nil {
 		w.tower, w.towerToken = s.Tower.URL, s.Tower.Token
+	}
+	if s.AcctKey != "" {
+		k, err := s.AcctKey.key()
+		if err != nil {
+			return false, err
+		}
+		w.acctKey = k
 	}
 	if s.EVM == nil && s.Eth != nil {
 		s.EVM = map[string]*wEthRec{"eth": s.Eth}

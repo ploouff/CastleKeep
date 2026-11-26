@@ -59,8 +59,9 @@ type Wallet struct {
 	mu      sync.Mutex
 	base    string // the exchange's address
 	Account string
-	Name    string // shown on the page; the account id starts with it
-	WT      bool   // the user's watchtower
+	Name    string            // shown on the page; the account id starts with it
+	WT      bool              // the user's watchtower
+	acctKey *btcec.PrivateKey // signs every request to the exchange (split_shared.go); saved
 	chains  map[string]*wChain
 	evm     map[string]*wEth // EVM chains by ID
 	orders  map[int]*wOrder
@@ -81,7 +82,8 @@ type Wallet struct {
 
 func NewWallet(exchangeURL string, cfgs map[string]UTXOConfig, rpc map[string]string) (*Wallet, error) {
 	k, _ := btcec.NewPrivateKey()
-	w := &Wallet{base: exchangeURL, Account: hex.EncodeToString(xonly(k))[:16], WT: true, chains: map[string]*wChain{}}
+	ak, _ := btcec.NewPrivateKey()
+	w := &Wallet{base: exchangeURL, Account: hex.EncodeToString(xonly(k))[:16], WT: true, chains: map[string]*wChain{}, acctKey: ak}
 	for id, cfg := range cfgs {
 		c, err := dialChain(rpc[id])
 		if err != nil {
@@ -171,7 +173,7 @@ func (w *Wallet) Open(chain string, sats int64) error {
 	}
 	vk, _ := btcec.NewPrivateKey()
 	var keys OpenKeysResp
-	if err := call(w.base, "/v1/open/keys", OpenKeysReq{w.Account, chain, xonly(vk), wc.pay}, &keys); err != nil {
+	if err := w.call("/v1/open/keys", OpenKeysReq{w.Account, chain, xonly(vk), wc.pay}, &keys); err != nil {
 		return err
 	}
 	// Our own rules, not the exchange's: the delays must be the ones we expect.
@@ -193,7 +195,7 @@ func (w *Wallet) Open(chain string, sats int64) error {
 	out := wire.OutPoint{Hash: fund.TxHash(), Index: 0}
 	us, uh := newSecret()
 	var st OpenStartResp
-	if err := call(w.base, "/v1/open/start", OpenStartReq{keys.VaultID, sats, out, uh}, &st); err != nil {
+	if err := w.call("/v1/open/start", OpenStartReq{keys.VaultID, sats, out, uh}, &st); err != nil {
 		return err
 	}
 	g := def.buildGen(out, sats, sats, 0)
@@ -210,7 +212,7 @@ func (w *Wallet) Open(chain string, sats int64) error {
 	g.exitSigU = signLeaf(g.exitTx, 0, def.exitFetch(g), def.ms, vk)
 	g.refundSigU = signLeaf(g.refundTx, 0, def.eFetch(g), def.dl, vk)
 	s0.userSigE = signLeaf(s0.etx, 0, def.eFetch(g), def.ms, vk)
-	if err := call(w.base, "/v1/open/finish", OpenFinishReq{keys.VaultID, g.exitSigU, g.refundSigU, s0.userSigE}, nil); err != nil {
+	if err := w.call("/v1/open/finish", OpenFinishReq{keys.VaultID, g.exitSigU, g.refundSigU, s0.userSigE}, nil); err != nil {
 		return err
 	}
 	if err := wc.c.send(fund); err != nil {
@@ -276,7 +278,7 @@ func (w *Wallet) Order(chain, side string, sats int64) error {
 	}
 	us, uh := newSecret()
 	var off StateOffer
-	if err := call(w.base, "/v1/order", OrderReq{v.id, side, sats, uh}, &off); err != nil {
+	if err := w.call("/v1/order", OrderReq{v.id, side, sats, uh}, &off); err != nil {
 		return err
 	}
 	want := v.latest().UserSats - sats
@@ -312,7 +314,7 @@ func (w *Wallet) utxoAgree(v *wVault, off StateOffer, want int64, us, uh []byte)
 		return userErr("Your watchtower couldn't be reached, so the trade was stopped before anything was handed over. Start it again and retry. (%v)", err)
 	}
 	var cr CommitResp
-	if err := call(w.base, "/v1/order/commit", CommitReq{v.id, st.Index, st.userSigE, l.uSecret}, &cr); err != nil {
+	if err := w.call("/v1/order/commit", CommitReq{v.id, st.Index, st.userSigE, l.uSecret}, &cr); err != nil {
 		return err
 	}
 	v.states = append(v.states, st)
@@ -351,7 +353,7 @@ func (w *Wallet) Settle(chain string) error {
 		req.UserNonce = nonce.pub()
 	}
 	var sr SettleResp
-	if err := call(w.base, "/v1/settle", req, &sr); err != nil {
+	if err := w.call("/v1/settle", req, &sr); err != nil {
 		return err
 	}
 	var full *wire.MsgTx
@@ -477,7 +479,7 @@ func (w *Wallet) Capacity(chain string, sats int64) error {
 		req.UserNonce = nonce.pub()
 	}
 	var off CapacityOffer
-	if err := call(w.base, "/v1/capacity", req, &off); err != nil {
+	if err := w.call("/v1/capacity", req, &off); err != nil {
 		return err
 	}
 	g, l := v.gen(), v.latest()
@@ -549,7 +551,7 @@ func (w *Wallet) Capacity(chain string, sats int64) error {
 	ng.refundSigU = signLeaf(ng.refundTx, 0, v.def.eFetch(ng), v.def.dl, v.key)
 	st.userSigE = signLeaf(st.etx, 0, v.def.eFetch(ng), v.def.ms, v.key)
 	commit.ExitSig, commit.RefundSig, commit.UserSigE = ng.exitSigU, ng.refundSigU, st.userSigE
-	if err := call(w.base, "/v1/capacity/commit", commit, nil); err != nil {
+	if err := w.call("/v1/capacity/commit", commit, nil); err != nil {
 		return err
 	}
 	tx.TxIn[0].Witness = witness
@@ -568,7 +570,7 @@ func (w *Wallet) finishSplice(wc *wChain, v *wVault) {
 	}
 	prev := v.states[len(v.states)-2]
 	var cr CommitResp
-	if err := call(w.base, "/v1/capacity/finish", CapacityFinishReq{v.id, prev.uSecret}, &cr); err != nil {
+	if err := w.call("/v1/capacity/finish", CapacityFinishReq{v.id, prev.uSecret}, &cr); err != nil {
 		return
 	}
 	v.spliceFinished = true
@@ -729,11 +731,11 @@ func (w *Wallet) Vault(chain string) (userSats, exchSats int64, states int, clos
 // AddCash asks the exchange for $10,000 of test cash.
 func (w *Wallet) AddCash() (int64, error) {
 	var r CashResp
-	err := call(w.base, "/v1/cash", CashReq{w.Account}, &r)
+	err := w.call("/v1/cash", CashReq{w.Account}, &r)
 	return r.CashCents, err
 }
 
 // Admin changes the exchange's behaviour or price (test networks only).
 func (w *Wallet) Admin(chain, mode string, usd int64) error {
-	return call(w.base, "/v1/admin", AdminReq{chain, mode, usd}, nil)
+	return w.call("/v1/admin", AdminReq{chain, mode, usd}, nil)
 }

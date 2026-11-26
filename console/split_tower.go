@@ -147,6 +147,10 @@ type Tower struct {
 
 	file, saveErr string
 	lastSaved     []byte
+
+	// shared mode (split_shared.go): its page lists every wallet, so it needs the admin token
+	shared     bool
+	adminToken string // saved
 }
 
 // towerFeeMin is what the watchtower wants on an EVM chain to pay for a
@@ -199,7 +203,7 @@ func (t *Tower) Handler() http.Handler {
 	m.Handle("/v1/tower/update", handle(t.update))
 	m.Handle("/v1/tower/status", handle(t.status))
 	m.Handle("/v1/tower/forget", handle(t.forget))
-	m.Handle("/v1/tower/view", handle(func(empty) (TowerView, error) { return t.View(), nil }))
+	m.Handle("/v1/tower/view", adminOnly(t.adminOK, handle(func(empty) (TowerView, error) { return t.View(), nil })))
 	return m
 }
 
@@ -691,9 +695,10 @@ func (t *Tower) View() TowerView {
 // ------------------------------------------------------------------ saving
 
 type towerSave struct {
-	Version int
-	Key     keyHex // the fee key on the EVM chains
-	Wallets map[string]*towerWallet
+	Version    int
+	Key        keyHex // the fee key on the EVM chains
+	Wallets    map[string]*towerWallet
+	AdminToken string `json:",omitempty"` // shared mode: for its page
 }
 
 func (t *Tower) SaveTo(path string) {
@@ -707,7 +712,7 @@ func (t *Tower) save() {
 	if t.file == "" {
 		return
 	}
-	data, err := json.MarshalIndent(towerSave{saveVersion, keyRec(t.key), t.wallets}, "", " ")
+	data, err := json.MarshalIndent(towerSave{saveVersion, keyRec(t.key), t.wallets, t.adminToken}, "", " ")
 	if err == nil && string(data) == string(t.lastSaved) {
 		return
 	}
@@ -747,6 +752,7 @@ func (t *Tower) Load(path string) (bool, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.key, t.addr = k, ethAddress(k)
+	t.adminToken = s.AdminToken
 	t.wallets = map[string]*towerWallet{}
 	for id, tw := range s.Wallets {
 		if tw.UTXO == nil {
@@ -907,7 +913,9 @@ func (w *Wallet) towerSend(now bool) error {
 	}
 	var st TowerStatus
 	var err error
-	if fp == w.towerSent && !now {
+	// A full update (which also signs the wallet up) unless the watchtower already
+	// has everything: then just its status. After any failure, a full update again.
+	if fp == w.towerSent && w.towerStat != nil && w.towerErr == "" && !now {
 		err = callAs("the watchtower", towerClient, w.tower, "/v1/tower/status", TowerAuth{w.Account, w.towerToken}, &st)
 	} else {
 		err = callAs("the watchtower", towerClient, w.tower, "/v1/tower/update", w.towerUpdate(), &st)
@@ -939,6 +947,9 @@ func (w *Wallet) towerNote(chain string) string {
 	}
 	at := "Separate watchtower at " + w.tower + ": "
 	if w.towerErr != "" {
+		if !strings.Contains(w.towerErr, "Couldn't reach") {
+			return at + "it refused the last update (" + w.towerErr + "). Trades on Bitcoin and Litecoin wait until it takes one."
+		}
 		return at + "can't be reached right now. Trades on Bitcoin and Litecoin wait until it's back, so it never holds a state you've given up."
 	}
 	st := w.towerStat

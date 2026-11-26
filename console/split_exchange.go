@@ -87,12 +87,19 @@ type Exchange struct {
 	lastSaved     []byte
 	seal          *sealKey // password for the file (seal.go); nil: plain text
 	kept          xSave    // saved chains this run doesn't use, written back unchanged
+
+	// shared mode (split_shared.go): other people's wallets over the internet
+	shared     bool
+	adminToken string            // saved
+	acctKeys   map[string]string // account -> its key (x-only, hex), from its first signed request; saved
+	seen       map[string]int64  // signatures already used -> when
 }
 
 // NewExchange connects to each chain's node. rpc maps chain id to the
 // node's RPC address.
 func NewExchange(cfgs map[string]UTXOConfig, rpc map[string]string) (*Exchange, error) {
-	x := &Exchange{chains: map[string]*xChain{}, vaults: map[string]*xVault{}, cash: map[string]int64{}}
+	x := &Exchange{chains: map[string]*xChain{}, vaults: map[string]*xVault{}, cash: map[string]int64{},
+		acctKeys: map[string]string{}, seen: map[string]int64{}}
 	for id, cfg := range cfgs {
 		c, err := dialChain(rpc[id])
 		if err != nil {
@@ -116,33 +123,33 @@ func (x *Exchange) AddCoins(chain string, op wire.OutPoint, amt int64) {
 
 func (x *Exchange) Handler() http.Handler {
 	m := http.NewServeMux()
-	m.Handle("/v1/open/keys", handle(x.openKeys))
-	m.Handle("/v1/open/start", handle(x.openStart))
-	m.Handle("/v1/open/finish", handle(x.openFinish))
-	m.Handle("/v1/order", handle(x.order))
-	m.Handle("/v1/order/commit", handle(x.commit))
-	m.Handle("/v1/settle", handle(x.settle))
-	m.Handle("/v1/capacity", handle(x.capacity))
-	m.Handle("/v1/capacity/commit", handle(x.capacityCommit))
-	m.Handle("/v1/capacity/finish", handle(x.capacityFinish))
-	m.Handle("/v1/cash", handle(x.addCash))
-	m.Handle("/v1/cashbalance", handle(func(r CashReq) (CashResp, error) { return CashResp{x.Cash(r.Account)}, nil }))
-	m.Handle("/v1/admin", handle(x.admin))
-	m.Handle("/v1/eth/info", handle(x.ethInfo))
-	m.Handle("/v1/eth/open", handle(x.ethOpen))
-	m.Handle("/v1/eth/order", handle(x.ethOrder))
-	m.Handle("/v1/eth/commit", handle(x.ethCommit))
-	m.Handle("/v1/eth/capacity", handle(x.ethCapacity))
-	m.Handle("/v1/eth/capacity/offer", handle(x.ethCapacityOffer))
-	m.Handle("/v1/eth/settle", handle(x.ethSettle))
-	m.Handle("/v1/swap", handle(x.swap))
-	m.Handle("/v1/book/place", handle(x.place))
-	m.Handle("/v1/book/cancel", handle(x.cancel))
-	m.Handle("/v1/book", handle(x.bookView))
-	m.Handle("/v1/fills/next", handle(x.nextFill))
-	m.Handle("/v1/info", handle(x.info))
-	m.Handle("/v1/state", handle(x.state))
-	m.Handle("/v1/tick", handle(func(empty) (empty, error) { x.Tick(); return empty{}, nil }))
+	m.Handle("/v1/open/keys", authed(x, x.openKeys))
+	m.Handle("/v1/open/start", authed(x, x.openStart))
+	m.Handle("/v1/open/finish", authed(x, x.openFinish))
+	m.Handle("/v1/order", authed(x, x.order))
+	m.Handle("/v1/order/commit", authed(x, x.commit))
+	m.Handle("/v1/settle", authed(x, x.settle))
+	m.Handle("/v1/capacity", authed(x, x.capacity))
+	m.Handle("/v1/capacity/commit", authed(x, x.capacityCommit))
+	m.Handle("/v1/capacity/finish", authed(x, x.capacityFinish))
+	m.Handle("/v1/cash", authed(x, x.addCash))
+	m.Handle("/v1/cashbalance", authed(x, func(r CashReq) (CashResp, error) { return CashResp{x.Cash(r.Account)}, nil }))
+	m.Handle("/v1/admin", adminOnly(x.adminOK, handle(x.admin)))
+	m.Handle("/v1/eth/info", authed(x, x.ethInfo))
+	m.Handle("/v1/eth/open", authed(x, x.ethOpen))
+	m.Handle("/v1/eth/order", authed(x, x.ethOrder))
+	m.Handle("/v1/eth/commit", authed(x, x.ethCommit))
+	m.Handle("/v1/eth/capacity", authed(x, x.ethCapacity))
+	m.Handle("/v1/eth/capacity/offer", authed(x, x.ethCapacityOffer))
+	m.Handle("/v1/eth/settle", authed(x, x.ethSettle))
+	m.Handle("/v1/swap", authed(x, x.swap))
+	m.Handle("/v1/book/place", authed(x, x.place))
+	m.Handle("/v1/book/cancel", authed(x, x.cancel))
+	m.Handle("/v1/book", authed(x, x.bookView))
+	m.Handle("/v1/fills/next", authed(x, x.nextFill))
+	m.Handle("/v1/info", authed(x, x.info))
+	m.Handle("/v1/state", adminOnly(x.adminOK, handle(x.state)))
+	m.Handle("/v1/tick", adminOnly(x.adminOK, handle(func(empty) (empty, error) { x.Tick(); return empty{}, nil })))
 	// Save after every request (only writes when something changed).
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.ServeHTTP(w, r)

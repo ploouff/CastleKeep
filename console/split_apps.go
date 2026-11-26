@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -51,6 +52,8 @@ type ChainStatus struct {
 	Ready             bool
 	Network           string       // "" (private regtest) or "signet"
 	Eth               *EthEndpoint // Ethereum only: node, contract and exit window
+	Gateway           string       `json:",omitempty"` // Bitcoin/Litecoin: the node through the chains program (split_shared.go), e.g. /rpc/btc
+	Shared            bool         `json:",omitempty"` // the chains program is on a shared server: use the gateway
 }
 type FaucetReq struct {
 	Chain  string
@@ -81,12 +84,19 @@ func runChains(args []string) {
 	exitWindow := fs.String("exit-window", "24h", "EVM chains: how long the exit window lasts for new vaults, between 1m and 24h (e.g. 1h to try an exit in an afternoon)")
 	coins := fs.String("coins", "btc,eth,pol,base,bnb,avax", "testnets: which networks to use (btc = signet, eth = Sepolia, pol = Amoy, base = Base Sepolia, bnb = BNB testnet, avax = Fuji)")
 	rpcs := fs.String("rpc", "", "testnets: other public nodes to use, e.g. eth=https://...,pol=https://...")
+	shared := fs.Bool("shared", false, "on a server other people's wallets reach (SERVER.md): wallets use the node through a gateway, and the faucet, mining and contract endpoints only answer programs on this server. Needs -network testnets or signet")
 	fs.Parse(args)
 
 	testnets := *network == "testnets"
 	signet := *network == "signet" || testnets
 	if !signet && *network != "regtest" {
 		fmt.Println("-network must be regtest, signet or testnets.")
+		os.Exit(1)
+	}
+	if *shared && !signet {
+		// Private chains need someone to mine and a faucet, and their EVM nodes
+		// would let anyone send from any address: not for sharing.
+		fmt.Println("-shared is for the public test networks: add -network testnets (or -network signet).")
 		os.Exit(1)
 	}
 	delay, err := parseExitWindow(*exitWindow)
@@ -198,7 +208,7 @@ func runChains(args []string) {
 		}
 	}
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM) // Ctrl+C, or a service manager stopping it on a server
 	go func() {
 		<-sig
 		fmt.Println("\nStopping the test nodes…")
@@ -216,7 +226,8 @@ func runChains(args []string) {
 		var out []ChainStatus
 		for id, e := range engines {
 			s := e.Snapshot()
-			out = append(out, ChainStatus{ID: id, RPC: e.RPCAddr(), Progress: s.Progress, Ready: s.Ready, Network: e.cfg.Network})
+			out = append(out, ChainStatus{ID: id, RPC: e.RPCAddr(), Progress: s.Progress, Ready: s.Ready, Network: e.cfg.Network,
+				Gateway: "/rpc/" + id, Shared: *shared})
 		}
 		for id, ee := range evms {
 			s := ee.Snapshot()
@@ -236,14 +247,17 @@ func runChains(args []string) {
 		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 		return out, nil
 	}))
-	m.Handle("/contract", handle(func(r ContractReq) (empty, error) {
+	for id, e := range engines {
+		m.Handle("/rpc/"+id, rpcGateway(e.RPCAddr))
+	}
+	m.Handle("/contract", localOnly(*shared, handle(func(r ContractReq) (empty, error) {
 		p, ok := publics[r.Chain]
 		if !ok {
 			return empty{}, userErr("%s isn't a public test network here.", r.Chain)
 		}
 		return empty{}, p.register(r.Address)
-	}))
-	m.Handle("/faucet", handle(func(r FaucetReq) (FaucetResp, error) {
+	})))
+	m.Handle("/faucet", localOnly(*shared, handle(func(r FaucetReq) (FaucetResp, error) {
 		if p, ok := publics[r.Chain]; ok {
 			return FaucetResp{}, userErr("%s is a public test network: get coins from a %s faucet instead.", p.c.Network, p.c.Network)
 		}
@@ -262,8 +276,8 @@ func runChains(args []string) {
 		}
 		op, err := e.Faucet(r.Script, r.Sats)
 		return FaucetResp{op, r.Sats}, err
-	}))
-	m.Handle("/mine", handle(func(r MineReq) (empty, error) {
+	})))
+	m.Handle("/mine", localOnly(*shared, handle(func(r MineReq) (empty, error) {
 		if p, ok := publics[r.Chain]; ok {
 			return empty{}, userErr("Blocks come by themselves on %s; there's nothing to mine.", p.c.Network)
 		}
@@ -275,11 +289,14 @@ func runChains(args []string) {
 			return empty{}, userErr("Unknown chain.")
 		}
 		return empty{}, e.Mine(r.N)
-	}))
+	})))
 	ln, url := listen(*port)
 	fmt.Println("Castlekeep test chains (test networks only)")
 	fmt.Println("Chains service:", url)
 	fmt.Println("Kept in:", *data, "(start with -fresh for new chains)")
+	if *shared {
+		fmt.Println("Shared: other computers reach the Bitcoin node only through the gateway (a few reading calls and sending transactions); the faucet, mining and contract endpoints only answer programs on this server.")
+	}
 	if testnets {
 		fmt.Println("Public test networks (coins with no value). Exit window for new EVM vaults:", durText(delay))
 	}
@@ -323,7 +340,7 @@ func waitChains(url string) (map[string]UTXOConfig, map[string]string, map[strin
 				if isEVM(c.ID) {
 					eps[c.ID] = c.Eth
 				} else {
-					rpc[c.ID] = c.RPC
+					rpc[c.ID] = gatewayURL(url, c)
 					cfgs[c.ID] = splitConfigs()[c.ID]
 					if c.Network == "signet" {
 						cfgs[c.ID] = signetConfig(goBin("btcd"))
@@ -425,6 +442,7 @@ func runExchange(args []string) {
 	fresh := fs.Bool("fresh", false, "start a new exchange (the old file is renamed, not deleted)")
 	protect := fs.Bool("password", false, "protect the saved file with a password (asked for at start)")
 	unprotect := fs.Bool("remove-password", false, "save the file in plain text again")
+	shared := fs.Bool("shared", false, "on a server other people's wallets reach (SERVER.md): every request must be signed by its wallet and may only touch that wallet's vaults; modes, prices and the admin page need the admin token")
 	fs.Parse(args)
 
 	cfgs, rpc, eps := waitChains(*chains)
@@ -475,6 +493,10 @@ func runExchange(args []string) {
 		}
 	}
 	x.SaveTo(file)
+	adminQuery := ""
+	if *shared {
+		adminQuery = "?token=" + x.Shared()
+	}
 	go func() {
 		for range time.Tick(time.Second) {
 			x.Tick()
@@ -491,10 +513,16 @@ func runExchange(args []string) {
 	ln, url := listen(*port)
 	fmt.Println("Castlekeep exchange server (test networks only)")
 	fmt.Println("It holds only the exchange's keys. Saved in:", file, savedHow(x.seal))
-	fmt.Println("Admin page:", url)
-	fmt.Println("Next, in another window:  go run . wallet")
+	fmt.Println("Admin page:", url+"/"+adminQuery)
+	if *shared {
+		fmt.Println("Shared: every request must be signed by its wallet and may only touch that wallet's own vaults.")
+		fmt.Println("The admin page and changing modes or prices need the token in the address above. Keep it to yourself;")
+		fmt.Println("on the server's web address it's  https://<your server>/exchange/" + adminQuery)
+	} else {
+		fmt.Println("Next, in another window:  go run . wallet")
+	}
 	if !*noBrowser {
-		openBrowser(url)
+		openBrowser(url + "/" + adminQuery)
 	}
 	http.Serve(ln, m)
 }
@@ -511,6 +539,7 @@ func runWatchtower(args []string) {
 	noBrowser := fs.Bool("no-browser", false, "don't open its page")
 	data := fs.String("data", DataDir(), "folder for the watchtower's saved data (watchtower.json)")
 	fresh := fs.Bool("fresh", false, "start a new watchtower (the old file is renamed, not deleted)")
+	shared := fs.Bool("shared", false, "on a server other people's wallets reach (SERVER.md): its page, which lists every wallet it watches, needs the admin token")
 	fs.Parse(args)
 
 	cfgs, rpc, eps := waitChains(*chains)
@@ -527,6 +556,10 @@ func runWatchtower(args []string) {
 	file := filepath.Join(*data, "watchtower.json")
 	startFile(file, *fresh, t.Load)
 	t.SaveTo(file)
+	pageQuery := ""
+	if *shared {
+		pageQuery = "?token=" + t.Shared()
+	}
 	// Its own coins, only to pay gas when it submits a state on an EVM chain.
 	for _, c := range evmChains {
 		te := t.evm[c.ID]
@@ -561,11 +594,17 @@ func runWatchtower(args []string) {
 	fmt.Println("Castlekeep watchtower (test networks only)")
 	fmt.Println("It holds no keys to your coins: only transactions your wallet signed in advance, which pay you.")
 	fmt.Println("Saved in:", file)
-	fmt.Println("Its page:", url)
-	fmt.Println("Next, start your wallet with it (once is enough; the wallet remembers):")
-	fmt.Println("  go run . wallet -name alice -watchtower", url)
+	fmt.Println("Its page:", url+"/"+pageQuery)
+	if *shared {
+		fmt.Println("Shared: its page needs the token in that address (on the server's web address: https://<your server>/tower/" + pageQuery + ").")
+		fmt.Println("Each wallet signs up with its own token, so wallets can't see or change each other's data.")
+		fmt.Println("Wallets use it with:  go run . wallet -name <name> -watchtower https://<your server>/tower")
+	} else {
+		fmt.Println("Next, start your wallet with it (once is enough; the wallet remembers):")
+		fmt.Println("  go run . wallet -name alice -watchtower", url)
+	}
 	if !*noBrowser {
-		openBrowser(url)
+		openBrowser(url + "/" + pageQuery)
 	}
 	http.Serve(ln, m)
 }
@@ -670,7 +709,7 @@ func runWallet(args []string) {
 	account := func() AccountView {
 		cash := int64(0)
 		var cr CashResp
-		if call(*exch, "/v1/cashbalance", CashReq{w.Account}, &cr) == nil {
+		if w.call("/v1/cashbalance", CashReq{w.Account}, &cr) == nil {
 			cash = cr.CashCents
 		}
 		a := NewAccount()
@@ -812,13 +851,13 @@ func (e *walletEngine) height() int64 {
 func (e *walletEngine) Snapshot() Snapshot {
 	s := Snapshot{Chain: e.info, Available: true, Ready: true, Progress: "Ready", Watchtower: e.w.WT, HasUserWT: true, Txs: []*TxInfo{}}
 	var info InfoResp
-	if err := call(e.exch, "/v1/info", InfoReq{e.id}, &info); err == nil {
+	if err := e.w.call("/v1/info", InfoReq{e.id}, &info); err == nil {
 		s.Price, s.Mode = info.Price, info.Mode
 	} else {
 		s.Mode = "offline"
 	}
 	var cr CashResp
-	if call(e.exch, "/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
+	if e.w.call("/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
 		s.CashCents = cr.CashCents
 	}
 	s.Who, s.Book = e.w.Name, e.w.bookSnapshot(e.id)
