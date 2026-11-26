@@ -908,7 +908,7 @@ func (e *walletEngine) height() int64 {
 }
 
 func (e *walletEngine) Snapshot() Snapshot {
-	s := Snapshot{Chain: e.info, Available: true, Ready: true, Progress: "Ready", Watchtower: e.w.WT, HasUserWT: true, Txs: []*TxInfo{}}
+	s := Snapshot{Chain: e.info, Available: true, Ready: true, Progress: "Ready", Watchtower: e.w.WT, HasUserWT: true, Txs: []*TxInfo{}, Exchange: e.exch}
 	var info InfoResp
 	if err := e.w.look("/v1/info", InfoReq{e.id}, &info); err == nil {
 		s.Price, s.Mode = info.Price, info.Mode

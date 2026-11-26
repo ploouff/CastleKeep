@@ -159,6 +159,7 @@ type Snapshot struct {
 	Book        *BookResp  `json:"book,omitempty"`         // separate programs: this coin's order book
 	Tower       string     `json:"tower,omitempty"`        // separate programs: the separate watchtower, in a line
 	ExchDown    string     `json:"exchangeDown,omitempty"` // separate programs: why the exchange can't be reached right now
+	Exchange    string     `json:"exchange,omitempty"`     // separate programs: the exchange's address
 }
 
 type Engine interface {

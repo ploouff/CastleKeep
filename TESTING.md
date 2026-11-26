@@ -38,7 +38,7 @@ lock, confirm, trade, get your coins back), ticking each off; its buttons do the
 where it is. **Hide this guide** puts it away, and the link under the tabs brings it back.
 
 **Test tools.** The recipes below that make the exchange misbehave, change the price or
-cheat need **Test tools** switched on (top right; the page remembers). With it off, those
+cheat need **Test tools** switched on (at the top, next to the Mine buttons; the page remembers). With it off, those
 buttons are hidden, and the page says so if the exchange was left offline or malicious.
 
 **Buy new BTC.** On the Bitcoin tab: lock `1`, Mine 1 block. In the vault's "Buy more than
@@ -321,6 +321,8 @@ On the wallet page (any of the ways above):
 - Start a wallet without the chains program: after ten seconds it says the chains don't
   answer and how to start them.
 - Once a vault is closed, its buttons go away and the box to open the next vault shows.
+- **Request exit** asks for a second click ("Click again to request the exit"); left alone, it
+  goes back after a few seconds and nothing happens.
 - Switch Windows to dark mode (Settings, Personalization, Colors): all three pages follow.
 
 ## What a failure looks like

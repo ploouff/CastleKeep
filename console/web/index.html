@@ -202,6 +202,7 @@ details pre{background:var(--card);border:1px solid var(--rule-soft);border-radi
 .reopen{margin:12px 28px 0}
 .banner{margin:22px 28px 0;padding:12px 16px;border:1px solid var(--amber);background:var(--amber-tint);border-radius:10px;font-size:14px}
 .banner b{display:block;font:600 16px var(--display);margin-bottom:2px}
+.banner.lost{margin:12px 28px;border-color:var(--red);background:var(--red-tint)}
 @media (max-width:680px){.banner{margin:16px 16px 0}}
 .flash{animation:flash 1.8s ease-out}
 @keyframes flash{0%,45%{box-shadow:0 0 0 3px var(--amber)}100%{box-shadow:0 0 0 0 rgba(173,114,16,0)}}
@@ -301,6 +302,7 @@ select{font:inherit;color:inherit;border:1px solid var(--rule);border-radius:6px
     <label class="switch tools-switch" title="Make the exchange go offline or cheat, change prices, and more, to see how the vault protects you"><input type="checkbox" id="toolsOn"> Test tools</label>
   </div>
 </header>
+<div class="banner lost" id="lostBanner" role="alert" hidden><b>Lost contact with Castlekeep</b>The page can't reach the program it belongs to. Is its window still open? (The numbers below are from before.) The page reconnects by itself once it's back.</div>
 <section class="acct" id="acct" aria-label="Your test account across every coin"></section>
 <nav class="tabs" role="tablist" aria-label="Choose a blockchain" id="tabs"></nav>
 <details class="model" id="modelBox"><summary id="modelSum">How this vault works, in detail</summary><p id="model"></p></details>
@@ -652,7 +654,7 @@ function renderStart() {
   $("startDone").hidden = !done;
   if (done) {
     setHTML("startDone", `That's the whole cycle: coins in, a trade, coins out. Next, see what happens when the exchange misbehaves:
-      ${tools ? "try the recipes under <b>Things to try with the test tools</b>." : "switch on <b>Test tools</b> at the top right, then try the recipes that appear."}
+      ${tools ? "try the recipes under <b>Things to try with the test tools</b>." : "switch on <b>Test tools</b> at the top of the page, then try the recipes that appear."}
       To go round again, lock some more ${esc(S.chain.ticker)}.`);
   }
 }
@@ -730,15 +732,21 @@ async function pollChains() {
 // While this tab is hidden the page asks far less often, and catches up as
 // soon as it's shown again.
 const every = ms => document.hidden ? 15000 : ms;
-let pollTimer = null, acctTimer = null;
+let pollTimer = null, acctTimer = null, lostFor = 0;
+// lost shows (after two failed refreshes) or hides the "lost contact" banner.
+function lost(failed) {
+  lostFor = failed ? lostFor + 1 : 0;
+  $("lostBanner").hidden = lostFor < 2;
+}
 async function poll() {
   clearTimeout(pollTimer);
   if (cur) {
     try {
       const want = cur;
       const s = await (await fetch("/api/state?chain=" + want)).json();
+      lost(false);
       if (want === cur) { S = s; if (!busy) render(); }
-    } catch (e) {}
+    } catch (e) { lost(true); }
   }
   clearTimeout(pollTimer); pollTimer = setTimeout(poll, every(S && S.ready ? 2500 : 800));
 }
@@ -926,6 +934,23 @@ function lockForm(c, title) {
       <p class="hint" id="lockHint">${hint}</p>
     </div>`;
 }
+// exchangeName: the exchange's address in a few words (separate wallet).
+function exchangeName(u) {
+  try {
+    const x = new URL(u), local = /^(127\.0\.0\.1|localhost)$/.test(x.hostname);
+    return local ? `on this computer (port ${x.port || 80})` : x.host + x.pathname.replace(/\/exchange\/?$/, "").replace(/\/$/, "");
+  } catch (e) { return u; }
+}
+// confirmFirst: a button that can't be undone asks for a second click. The
+// first click shows its data-confirm text for a few seconds.
+function confirmFirst(fn) {
+  return e => {
+    const b = e.currentTarget;
+    if (b.dataset.armed === "1") { b.dataset.armed = ""; b.textContent = b.dataset.label; clearTimeout(b._t); return fn(); }
+    b.dataset.label = b.textContent; b.dataset.armed = "1"; b.textContent = b.dataset.confirm;
+    b._t = setTimeout(() => { b.dataset.armed = ""; b.textContent = b.dataset.label; }, 4000);
+  };
+}
 // What's left to lock once the network fee is paid (gas on the EVM chains).
 const lockable = () => Math.max(0, S.walletSats - (S.chain.evm ? 1e6 : 3000));
 function bindLock() {
@@ -1019,9 +1044,9 @@ function renderVault() {
     </div>
     <div class="actions" id="vaultActions" ${v.status === "closed" ? "hidden" : ""}>
       <button class="btn primary" id="settle" ${v.status === "open" ? "" : "disabled"}>Settle with the exchange</button>
-      <button class="btn amber" id="exit" ${v.status === "open" ? "" : "disabled"}>Request exit</button>
+      <button class="btn amber" id="exit" data-confirm="Click again to request the exit" ${v.status === "open" ? "" : "disabled"}>Request exit</button>
       <button class="btn" id="claim" ${canClaim ? "" : "disabled"}>${esc(c.claimLabel)}</button>
-      ${rev ? `<button class="btn danger tt" id="cheat" ${canClaim ? "" : "disabled"} title="Test tool: publish your copy of an older state that paid you more">Publish an older state yourself</button>` : ""}
+      ${rev ? `<button class="btn danger tt" id="cheat" data-confirm="Click again: you may lose your share" ${canClaim ? "" : "disabled"} title="Test tool: publish your copy of an older state that paid you more">Publish an older state yourself</button>` : ""}
     </div>
     <p class="hint">${v.status === "funding" ? (isPublic(c) ? "Waiting for the next block to confirm your deposit (or the exchange's) before trading." : "Mine a block to confirm your deposit before trading.") :
       v.status === "open" ? "Settling is instant when the exchange cooperates. Request an exit if it won't." : ""}</p>
@@ -1036,9 +1061,9 @@ function renderVault() {
   const capBtn = $("capBtn");
   if (capBtn) capBtn.onclick =() => act({action: "capacity", sats: Math.round((parseFloat($("capAmt").value) || 0) * 1e8)});
   $("settle").onclick = () => act({action: "settle"});
-  $("exit").onclick = () => act({action: "exit", by: "user"});
+  $("exit").onclick = confirmFirst(() => act({action: "exit", by: "user"}));
   $("claim").onclick = () => act({action: "claim"});
-  if ($("cheat")) $("cheat").onclick = () => act({action: "cheat"});
+  if ($("cheat")) $("cheat").onclick = confirmFirst(() => act({action: "cheat"}));
 }
 
 function capacityBlock(v, c) {
@@ -1107,7 +1132,8 @@ function renderStatic() {
   lastChain = c.id; selectedTx = null;
   try { localStorage.setItem("ck-chain", c.id); } catch (e) {}
   document.title = `Castlekeep: ${c.name}`;
-  $("where").textContent = isPublic(c) ? "This coin runs on a public test network: real blocks, coins with no value." : "Running on private test chains on this computer: you make blocks with the Mine buttons.";
+  $("where").textContent = (isPublic(c) ? "This coin runs on a public test network: real blocks, coins with no value." : "Running on private test chains on this computer: you make blocks with the Mine buttons.")
+    + (S.exchange ? ` Exchange: ${exchangeName(S.exchange)}.` : "");
   $("modelSum").textContent = `How the ${c.name} vault works, in detail`;
   $("gloss").innerHTML = glossary(c).map(([k, d]) => `<dt>${esc(k)}</dt><dd>${esc(d)}</dd>`).join("");
   $("mineBtns").innerHTML = c.mineButtons.map((b, i) => `<button class="btn" data-mi="${i}" ${b.title ? `title="${esc(b.title)}"` : ""}>${esc(b.label)}</button>`).join("");
