@@ -590,6 +590,7 @@ type wSave struct {
 	Orders        []wOrder
 	Tower         *wTowerRec `json:",omitempty"` // a separate watchtower in use (split_tower.go)
 	AcctKey       keyHex     `json:",omitempty"` // signs requests to the exchange (split_shared.go)
+	Server        string     `json:",omitempty"` // a shared server it uses (-server, split_server.go)
 }
 
 // SaveTo makes the wallet save itself to path after every change.
@@ -637,6 +638,7 @@ func (w *Wallet) record() wSave {
 		s.Tower = &wTowerRec{w.tower, w.towerToken}
 	}
 	s.AcctKey = keyRec(w.acctKey)
+	s.Server = w.server
 	for id, wc := range w.chains {
 		cr := wChainRec{Tag: wc.c.tag(), Key: keyRec(wc.key), Coins: utxoRecs(wc.coins)}
 		if v := wc.vault; v != nil {
@@ -699,6 +701,7 @@ func (w *Wallet) Load(path string) (bool, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.Account, w.Name, w.WT = s.Account, s.Name, s.WT
+	w.server = s.Server
 	if s.Tower != nil {
 		w.tower, w.towerToken = s.Tower.URL, s.Tower.Token
 	}

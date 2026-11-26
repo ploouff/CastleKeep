@@ -62,8 +62,21 @@ after the window**). You get the whole vault back.
 
 ## C. The separate programs
 
-Three windows, in this order. The chains program starts its own Hardhat node for each EVM
-chain, so you don't need a Hardhat window:
+**The quick way, one window:**
+
+```
+cd console
+go run . start -name alice
+```
+
+It starts the chains, then the exchange and the watchtower, then your wallet, labels every
+line with the program it came from, opens your wallet's page and prints the other pages'
+addresses. Check: Ctrl+C stops everything within a few seconds and says "Everything has
+stopped" (no `btcd`, `ltcd` or `node` left in Task Manager). Started twice, the second one
+says the ports are in use and stops; `-ports 9600` runs a second set beside the first.
+
+**Or three windows**, in this order. The chains program starts its own Hardhat node for each
+EVM chain, so you don't need a Hardhat window:
 
 ```
 cd console
@@ -277,6 +290,26 @@ By hand on your own PC (no server needed), with the public test networks:
    the exchange to Offline is refused ("Only the operator…").
 
 For a real server, follow [SERVER.md](SERVER.md).
+
+`go test -run "ServerAddress|SavedServer|TowerAnswers|StartHelpers|FilesPerNetwork" -v` checks
+the wallet's `-server` option (the three addresses on a server, remembered in the wallet's
+file, a watchtower only when one really answers there), the helpers of `go run . start`, and
+that the public test networks keep their files in `castlekeep-data\testnets`.
+
+## L. The page itself
+
+On the wallet page (any of the ways above):
+
+- The account bar is one row on a laptop screen. Pick a coin in it: its tab opens. Make the
+  window narrow: only the totals show, with **Show coins**.
+- With no vault, the vault panel has the box to lock coins. Type an amount and press Enter:
+  the Lock button shows it's working, then a message in the bottom-right says what happened
+  ("Locked 0.5 BTC into a new vault…").
+- Before the deposit confirms, the Exchange panel says why trading is off. Mine a block: it
+  turns on.
+- Settle and mine: the closed vault shows the box to open the next one.
+- Switch on **Test tools**, set the exchange to Offline and press **Settle with the exchange**:
+  the message is red and says why.
 
 ## What a failure looks like
 

@@ -675,7 +675,10 @@ func (t *Tower) View() TowerView {
 					ready++
 				}
 			}
-			st := fmt.Sprintf("Watching, with %s ready to send if needed", plural(ready, "transaction"))
+			st := "Watching. Nothing it would need to send yet"
+			if ready > 0 {
+				st = fmt.Sprintf("Watching, with %s ready to send if needed", plural(ready, "transaction"))
+			}
 			if sent > 0 {
 				st += fmt.Sprintf("; sent %d", sent)
 			}
@@ -990,6 +993,9 @@ func (w *Wallet) towerNote(chain string) string {
 	s := at + "nothing to watch for you right now"
 	if st.Vaults > 0 {
 		s = at + fmt.Sprintf("watching %s for you, with %s ready to send if needed", plural(st.Vaults, "vault"), plural(st.Ready, "transaction"))
+		if st.Ready == 0 {
+			s = at + fmt.Sprintf("watching %s for you (nothing it would need to send yet)", plural(st.Vaults, "vault"))
+		}
 	}
 	if st.LastCheck == 0 {
 		s += "; it hasn't looked at the chains yet."

@@ -218,16 +218,20 @@ address on each EVM network, to pay gas if it ever has to step in:
    ```
    git clone https://github.com/ploouff/CastleKeep.git
    cd CastleKeep\console
-   go run . wallet -name bob -chains https://castlekeep.example.com/chains -exchange https://castlekeep.example.com/exchange -watchtower https://castlekeep.example.com/tower
+   go run . wallet -name bob -server https://castlekeep.example.com
    ```
-   (Each friend uses their own name instead of `bob`.)
+   (Each friend uses their own name instead of `bob`.) Or, without typing commands: download
+   the repository (**Code → Download ZIP** on GitHub), unzip it and double-click **Join a
+   server.bat**. It asks for their name and your server's address the first time, and after
+   that starts the same wallet with one double-click.
 3. Their wallet page opens at `http://127.0.0.1:9300`, on their own computer. The
    **Start here** box walks them through it: copy an address, get faucet coins, lock, trade,
    settle. They don't need to download the signet chain: their wallet reads it through your
    server's gateway.
 
-Each time, they start the wallet with the same line: it remembers the watchtower, but not
-the exchange's and chains' addresses. To save typing, put the line in a `.bat` file.
+The wallet remembers the server, so next time they only need `go run . wallet -name bob`
+(in the `CastleKeep\console` folder). It finds the chains, the exchange and the watchtower on
+that address by itself (at `/chains`, `/exchange` and `/tower`).
 
 ## Updating
 

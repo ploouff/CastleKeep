@@ -306,9 +306,15 @@ func runChains(args []string) {
 	}
 	if signet && len(engines) > 0 {
 		fmt.Println("Bitcoin signet: the first start downloads the signet chain (a few GB; it can take hours).")
-		fmt.Println("When it says Ready, in another window:  go run . exchange")
+		if !underStart() {
+			fmt.Println("When it says Ready, in another window:  go run . exchange")
+		}
 	} else if testnets {
-		fmt.Println("Next, in another window:  go run . exchange")
+		if !underStart() {
+			fmt.Println("Next, in another window:  go run . exchange")
+		}
+	} else if underStart() {
+		fmt.Println("The first start mines test blocks (about a minute).")
 	} else {
 		fmt.Println("The first start mines test blocks (about a minute). Next, in another window:  go run . exchange")
 	}
@@ -323,7 +329,9 @@ func runChains(args []string) {
 			}
 		}()
 	}
-	fmt.Println("Press Ctrl+C here to stop the nodes.")
+	if !underStart() {
+		fmt.Println("Press Ctrl+C here to stop the nodes.")
+	}
 	serveHTTP(ln, perAddress(func() *guard { return gd }, m))
 }
 
@@ -526,7 +534,7 @@ func runExchange(args []string) {
 		fmt.Println("Shared: every request must be signed by its wallet and may only touch that wallet's own vaults.")
 		fmt.Println("The admin page and changing modes or prices need the token in the address above. Keep it to yourself;")
 		fmt.Println("on the server's web address it's  https://<your server>/exchange/" + adminQuery)
-	} else {
+	} else if !underStart() {
 		fmt.Println("Next, in another window:  go run . wallet")
 	}
 	if !*noBrowser {
@@ -611,7 +619,7 @@ func runWatchtower(args []string) {
 		fmt.Println("Shared: its page needs the token in that address (on the server's web address: https://<your server>/tower/" + pageQuery + ").")
 		fmt.Println("Each wallet signs up with its own token, so wallets can't see or change each other's data.")
 		fmt.Println("Wallets use it with:  go run . wallet -name <name> -watchtower https://<your server>/tower")
-	} else {
+	} else if !underStart() {
 		fmt.Println("Next, start your wallet with it (once is enough; the wallet remembers):")
 		fmt.Println("  go run . wallet -name alice -watchtower", url)
 	}
@@ -635,10 +643,33 @@ func runWallet(args []string) {
 	protect := fs.Bool("password", false, "protect the saved file with a password (asked for at start)")
 	unprotect := fs.Bool("remove-password", false, "save the file in plain text again")
 	towerURL := fs.String("watchtower", "", "a separate watchtower to keep up to date, e.g. http://127.0.0.1:9400 (remembered; \"off\" to stop using it)")
+	serverFlag := fs.String("server", "", "a shared server (SERVER.md), e.g. https://castlekeep.example.com: its chains, exchange and watchtower in one address (remembered; \"local\" to use the programs on this computer again)")
 	fs.Parse(args)
 	if !validName(*name) {
 		fmt.Println("Use only letters, digits, - and _ in -name.")
 		os.Exit(1)
+	}
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	// A shared server: typed now, or remembered from last time (unless the
+	// chains or exchange were given instead).
+	server, setServer := cleanServer(*serverFlag), given["server"]
+	if server == "https://local" {
+		server = ""
+	} else if !setServer && !given["chains"] && !given["exchange"] {
+		if s := savedServer(*data, *name); s != "" {
+			server, setServer = s, true
+			fmt.Println("Using the server from last time:", s, "(start with -server local to use the programs on this computer)")
+		}
+	}
+	if server != "" {
+		c, e, _ := serverURLs(server)
+		if !given["chains"] {
+			*chains = c
+		}
+		if !given["exchange"] {
+			*exch = e
+		}
 	}
 
 	cfgs, rpc, eps := waitChains(*chains)
@@ -661,6 +692,16 @@ func runWallet(args []string) {
 		w.SetName(*name)
 	}
 	w.SaveTo(file)
+	if setServer {
+		w.SetServer(server)
+	}
+	if server != "" {
+		fmt.Println("Server:", server, "(its chains, exchange and watchtower)")
+		// Its watchtower, unless this wallet already uses one.
+		if _, _, t := serverURLs(server); *towerURL == "" && w.TowerURL() == "" && towerAnswers(t) {
+			*towerURL = t
+		}
+	}
 	switch *towerURL {
 	case "":
 		// keep whatever the saved file says

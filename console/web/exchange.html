@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Castlekeep exchange (admin)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='4' width='28' height='24' rx='5' fill='%233E5878'/%3E%3Ccircle cx='16' cy='16' r='5.5' fill='none' stroke='white' stroke-width='2.5'/%3E%3Cpath d='M16 7.5v3M16 21.5v3M7.5 16h3M21.5 16h3' stroke='white' stroke-width='2.5'/%3E%3C/svg%3E">
 <style>
 :root{--paper:#E8ECF0;--panel:#F6F8F9;--ink:#17212B;--steel:#55636F;--rule:#C3CCD5;--pine:#2D5D4C;--red:#A3322A;--amber:#AD7210;
   --display:"Bahnschrift","DIN Alternate","Roboto Condensed","Arial Narrow",sans-serif;--body:"Segoe UI",system-ui,Arial,sans-serif;--mono:"Cascadia Mono",Consolas,monospace}
@@ -29,12 +30,16 @@ th{color:var(--steel);font-weight:600;font-size:13px}
 .mono{font-family:var(--mono);font-size:12.5px}
 .ev{color:var(--steel);font-size:12.5px;margin:0;padding-left:16px}
 .err{color:var(--red)}
+.summary{margin-top:8px!important;color:var(--ink)!important;font-size:15px!important}
+.btn[data-mode="malicious"][aria-pressed="true"]{background:var(--red);border-color:var(--red)}
+.btn[data-mode="offline"][aria-pressed="true"]{background:var(--amber);border-color:var(--amber)}
 </style>
 </head>
 <body>
 <header>
   <h1>Castlekeep exchange</h1>
   <p>Admin page of the exchange server. It holds only the exchange's keys; users' wallets hold theirs. Test networks only.</p>
+  <p class="summary" id="summary"></p>
 </header>
 <main>
   <section class="panel"><h2>Chains</h2><div class="chains" id="chains"></div><p class="err" id="err"></p></section>
@@ -80,6 +85,20 @@ async function refresh() {
     const s = await post("/v1/state");
     $("err").textContent = "";
     byChain = Object.fromEntries((s.Chains || []).map(c => [c.ID, c]));
+    // Everything in the same coin order as the chains above.
+    const order = (s.Chains || []).map(c => c.ID), rank = id => { const i = order.indexOf(id); return i < 0 ? 99 : i; };
+    s.Books = (s.Books || []).slice().sort((a, b) => rank(a.Chain) - rank(b.Chain));
+    const isOpen = v => v.Status === "open" || v.Status === "settling"; // closed ones say how: settled, claimed, published
+    s.Vaults = (s.Vaults || []).slice().sort((a, b) => isOpen(b) - isOpen(a) || rank(a.Chain) - rank(b.Chain));
+    { // at a glance
+      const vs = s.Vaults, open = vs.filter(isOpen).length;
+      const accts = new Set(vs.map(v => v.Account)).size;
+      const orders = s.Books.reduce((n, b) => n + (b.Orders || []).length, 0);
+      const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+      const odd = (s.Chains || []).filter(c => c.Mode !== "honest").map(c => `${c.Name || c.Ticker} is ${c.Mode}`);
+      $("summary").textContent = `${plural(accts, "account")} with vaults · ${plural(open, "vault")} open, ${vs.length - open} closed · ${plural(orders, "open order")}`
+        + (odd.length ? ` · Test setting: ${odd.join(", ")}` : "");
+    }
     if (!editing) $("chains").innerHTML = (s.Chains || []).map(c => `
       <div>
         <div style="font:600 17px var(--display)">${coinIcon(c, 20)} ${esc(c.Name || c.Ticker)}</div>
@@ -125,6 +144,12 @@ document.addEventListener("click", async e => {
     }
   } catch (err) { $("err").textContent = err.message; }
   editing = false; refresh();
+});
+// Enter in a price box sets the price.
+document.addEventListener("keydown", e => {
+  if (e.key !== "Enter" || !e.target.dataset || !e.target.dataset.price) return;
+  const b = document.querySelector(`[data-setprice="${e.target.dataset.price}"]`);
+  if (b) b.click();
 });
 document.addEventListener("focusin", e => { if (e.target.matches("input")) editing = true; });
 document.addEventListener("focusout", e => { if (e.target.matches("input")) setTimeout(() => editing = false, 300); });

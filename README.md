@@ -58,6 +58,8 @@ Exit output    (reached by an exit request both sides pre-sign when the vault op
 | Folder | What it is |
 | --- | --- |
 | [`console/`](console/) | A clickable web app for **Bitcoin, Litecoin, Ethereum, Polygon, Base, BNB Chain and Avalanche**. Lock, trade, settle, exit, move the chain forward and switch the exchange between honest, offline and malicious. **Start here.** |
+| `Start Castlekeep.bat` | Windows: double-click to run the test chains, the exchange, a watchtower and your wallet in one window (`go run . start`). |
+| `Join a server.bat` | Windows: double-click to run your wallet against a friend's server. Asks for your name and the server's address the first time. |
 | [`console/contract/`](console/contract/) | `CastleVault.sol`, the Ethereum smart contract. |
 | [`prototype/`](prototype/) | The original Bitcoin command-line version that runs four scenarios and checks every result. |
 | [`solana/`](solana/) | A Solana design and draft program (not yet compiled or tested), plus notes on other coins. |
@@ -107,6 +109,15 @@ go run .
 
 Your browser opens the console. See [`console/README.md`](console/README.md) for a full guide.
 
+The console runs both sides in one program. To run the exchange and your wallet as separate
+programs that never share keys (closer to the real thing), start them all in one window:
+
+```
+go run . start
+```
+
+On Windows you can also double-click **Start Castlekeep.bat** in the main folder.
+
 ## Prior art
 
 Castlekeep is a modern take on Arwen-style non-custodial exchange settlement. Arwen ran
@@ -150,6 +161,7 @@ This is a proof of concept, not a product.
 - [x] A separate watchtower program that protects you while your wallet is closed (no keys to your coins)
 - [x] A page a newcomer can follow: a five-step first try, plain-language word list, and test-only buttons behind a "Test tools" switch
 - [x] Shared mode for a server friends can use (signed requests, an operator token, a gateway to the Bitcoin node, limits on requests, accounts, vaults and orders) and a step-by-step guide: [SERVER.md](SERVER.md)
+- [x] One command for the separate programs (`go run . start`), one address for a friend's server (`-server`), and a tidier page: one-row account bar, lock box in the vault, a message after every action
 - [ ] Real fee estimation (btcd usually has no estimate; a minimum rate is used)
 - [ ] Lightning-channel version for near-instant deposits and withdrawals
 

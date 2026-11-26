@@ -81,6 +81,8 @@ type Wallet struct {
 
 	// answers to the exchange's read-only calls, reused for a moment (split_limits.go)
 	reads readCache
+
+	server string // a shared server it uses (-server, split_server.go); saved
 }
 
 func NewWallet(exchangeURL string, cfgs map[string]UTXOConfig, rpc map[string]string) (*Wallet, error) {
@@ -223,7 +225,7 @@ func (w *Wallet) Open(chain string, sats int64) error {
 	}
 	wc.learn(fund)
 	wc.vault = &wVault{id: keys.VaultID, key: vk, def: def, gens: []*vgen{g}, states: []*pstate{s0}, fund: fund}
-	wc.vault.log("Locked %d into a new vault; the exchange signed the exit request and pay-back first", sats)
+	wc.vault.log("Locked %s into a new vault; the exchange signed the exit request and pay-back first", fmtCoin(sats, wc.cfg.Info.Ticker))
 	return nil
 }
 
@@ -467,7 +469,7 @@ func (w *Wallet) Cheat(chain string) error {
 func (w *Wallet) Capacity(chain string, sats int64) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, v, err := w.openVault(chain)
+	wc, v, err := w.openVault(chain)
 	if err != nil {
 		return err
 	}
@@ -561,7 +563,7 @@ func (w *Wallet) Capacity(chain string, sats int64) error {
 	v.gens = append(v.gens, ng)
 	v.states = append(v.states, st)
 	v.spliceTx, v.spliceFinished = tx, false
-	v.log("The exchange is adding %d; secrets for state #%d are swapped once the splice confirms", sats, l.Index)
+	v.log("The exchange is adding %s; secrets for state #%d are swapped once the splice confirms", fmtCoin(sats, wc.cfg.Info.Ticker), l.Index)
 	return nil
 }
 
