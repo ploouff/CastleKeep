@@ -9,7 +9,7 @@ exchange between honest, offline and malicious.
 Every button creates real transactions, and the chain itself (a Bitcoin node, a Litecoin
 node, or the CastleVault smart contract on an EVM test node) decides whether each one is accepted or refused.
 
-![Castlekeep console on Ethereum](preview-eth.png)
+![Castlekeep: a wallet page on Ethereum, with the exit window running](preview-eth.png)
 
 > **Test networks only.** The coins have no value, nothing leaves your computer, and the
 > code hasn't been audited. Never use it with real coins.
@@ -154,8 +154,24 @@ starts fresh.
 
 The console above runs both sides in one program. You can also run the exchange and your
 wallet as **separate programs** that never share private keys: they only send each other
-signatures over the network, and each reads the chain itself. Open three Command Prompt
-windows in the `console` folder and start, in this order:
+signatures over the network, and each reads the chain itself.
+
+**All of them in one window:**
+
+```
+go run . start
+```
+
+(On Windows: double-click **Start Castlekeep.bat** in the main folder.)
+
+It starts the test chains, the exchange, a watchtower and your wallet in order, labels each
+line with the program it came from, opens your wallet's page and prints the addresses of the
+other pages. Ctrl+C stops everything, test nodes included. Options: `-name alice` (your
+wallet's name; without it, the wallet you used last), `-network testnets` (the public test networks), `-no-watchtower`, `-fresh`,
+`-ports 9600` (a second set beside the first). With a password-protected file, start the
+programs one by one instead, so each can ask for it.
+
+**Or one window each**, in the `console` folder, in this order:
 
 1. `go run . chains` starts the Bitcoin and Litecoin test nodes and a Hardhat node for each
    EVM chain (Ethereum, Polygon, Base, BNB Chain, Avalanche). Wait until it has mined its
@@ -201,7 +217,9 @@ go run . wallet -name bob -port 9301
 
 Each wallet page then has an **Order book** panel under the Exchange panel: the open sell
 orders (asks) and buy orders (bids) from every wallet, your own orders with a Cancel
-button, recent trades, and a form for a limit order (side, price per coin, amount).
+button, recent trades, and a form for a limit order (side, price per coin, amount). Pick a
+price in the book to fill in an order against it (buy from a seller, or sell to a buyer, at
+that price); **Max** fills in the most you can still promise.
 
 - Orders match best price first, then oldest first. The trade happens at the price of the
   order that was already waiting, and that price becomes the coin's price.
@@ -304,8 +322,12 @@ the watchtower run on a small rented server with `-shared`, behind a web server 
 HTTPS, and each person runs only their wallet with the server's addresses:
 
 ```
-go run . wallet -name bob -chains https://YOUR.SERVER/chains -exchange https://YOUR.SERVER/exchange -watchtower https://YOUR.SERVER/tower
+go run . wallet -name bob -server https://YOUR.SERVER
 ```
+
+`-server` finds the chains, the exchange and the watchtower on that address (at `/chains`,
+`/exchange` and `/tower`) and is remembered, so the next time `go run . wallet -name bob` is
+enough. `-server local` goes back to the programs on your own computer.
 
 With `-shared`, every request a wallet sends is signed with its own account key and may only
 touch its own account and vaults; changing modes or prices and the admin pages need the
@@ -427,14 +449,15 @@ EVM chains. Their coins have no value and come from public faucets.
 
 | Area | What it does |
 | --- | --- |
-| **Start here** | A first try in five steps, ticked off as you go: get test coins, lock them, wait for the deposit to confirm, make a trade, get your coins back. Each step has one button that does it or shows you where. Below it, **What the words mean** explains vault, state, settle, exit window, watchtower and the rest. **Hide this guide** puts it away (the page remembers). |
+| **Start here** | A first try in five steps, ticked off as you go: get test coins, lock them, wait for the deposit to confirm, make a trade, get your coins back. The steps sit in one row; under them, the current one says what to do and has one button that does it or shows you where. During an exit the last step follows it (the window running, then the button to take your coins). Once all five are done it folds to one line. Below it, **What the words mean** explains vault, state, settle, exit window, watchtower and the rest. **Hide this guide** puts it away (the page remembers). |
 | **Test tools** (switch at the top) | Off at first. It shows the tools for trying the safety features: how the exchange behaves (honest, offline, malicious), setting the price, **Have the exchange try to steal**, **Publish an older state yourself**, the exchange's wallet change, and the **Things to try with the test tools** recipes. With it off, the page still says when the exchange has been set to offline or malicious. |
-| **Account bar** | Every coin you hold, the shared cash balance and the total value, on every tab. |
+| **Account bar** | Every coin you hold, the shared cash balance (with **+ $10,000 test cash**) and the total value, on every tab. Pick a coin to go to its tab. On a narrow window only the totals show, with **Show coins**. |
 | **Chain tabs** | Switch between the coins. Each has a small coloured badge (drawn by the page, not the coin's official logo). A green dot means ready. Under them, **How the … vault works, in detail** opens the technical description. |
-| **Top-right buttons** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on the EVM chains they mine one block or skip the clock ahead an hour or a day. (None on the public test networks: blocks come by themselves.) |
-| **Your wallet** | Test coins only you control. Get more from the faucet, or lock some into a vault. On the EVM chains, gas fees come out of this. |
-| **Vault** | Who owns what now (the latest split you both signed), the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. |
-| **Exchange** | Sell or buy, swap into another coin, and switch your watchtower on or off. |
+| **Buttons at the top** | Move the chain forward. On Bitcoin and Litecoin these mine blocks; on the EVM chains they mine one block or skip the clock ahead an hour or a day. (None on the public test networks: blocks come by themselves.) |
+| **Your wallet** | Test coins only you control, and the faucet. On the EVM chains, gas fees come out of this. Under **Your protection**: your watchtower's switch and, with a separate watchtower, what it holds for you. |
+| **Vault** | With no vault, the box to lock coins into one. Then: who owns what now (the latest split you both signed), the exit clock, and the Settle, Request exit and Claim (or Pay out) buttons. On Ethereum it also shows the newest state submitted during an exit. Once closed, the box to open the next one. |
+| **Exchange** | **Trade now, at the exchange's price** (sell or buy), and swap into another coin. When trading is off, it says why. **Max** fills in the most you can trade or swap. |
+| **Messages** | Each button shows it's working while you wait, and the result appears in the bottom-right corner (red if something was refused). Enter in an amount box presses its button. If the exchange can't be reached at all, a banner says so (and that your coins stay in your vault). The pages follow your computer's dark or light setting. **Request exit** and **Publish an older state yourself** can't be undone, so they ask for a second click. A separate wallet's header says which exchange it uses. |
 | **Activity and Transaction inspector** | Everything that happened, and the exact rule that accepted or refused each transaction. |
 
 ## Things to try
@@ -484,6 +507,8 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `split_tower.go`, `web/tower.html` | The separate watchtower program and its page, and the wallet's side of it |
 | `split_shared.go` | Shared mode for a server: signed requests, ownership checks, the admin token, EVM vault claims, the chains gateway (see `../SERVER.md`) |
 | `split_limits.go` | Limits on a shared server: requests a second per address and per account, accounts, vaults, orders, test cash, what the watchtower keeps, calls to the node at once, request size; the wallet reuses what its page shows from the exchange for 2 seconds |
+| `split_start.go` | `go run . start`: the chains, exchange, watchtower and a wallet in one window (each still its own process); Ctrl+C stops them in order |
+| `split_server.go` | The wallet's `-server` option: a shared server's chains, exchange and watchtower from one address, remembered in the wallet's file |
 
 ## Known limits
 

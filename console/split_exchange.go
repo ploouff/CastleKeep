@@ -240,7 +240,7 @@ func (x *Exchange) openStart(r OpenStartReq) (OpenStartResp, error) {
 func (x *Exchange) openFinish(r OpenFinishReq) (empty, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	v, _, err := x.vault(r.VaultID)
+	v, xc, err := x.vault(r.VaultID)
 	if err != nil || len(v.gens) == 0 {
 		return empty{}, userErr("Unknown vault.")
 	}
@@ -252,7 +252,7 @@ func (x *Exchange) openFinish(r OpenFinishReq) (empty, error) {
 	}
 	g.exitSigU, g.refundSigU, st.userSigE = r.ExitSig, r.RefundSig, r.UserSigE
 	v.opened = true
-	v.log("Vault opened with %d, waiting for the deposit", g.vaultAmt)
+	v.log("Vault opened with %s, waiting for the deposit", fmtCoin(g.vaultAmt, xc.cfg.Info.Ticker))
 	return empty{}, nil
 }
 
@@ -594,7 +594,7 @@ func (x *Exchange) capacityCommit(r CapacityCommitReq) (empty, error) {
 	if len(tx.TxOut) > 1 {
 		xc.coins = append(xc.coins, utxo{wire.OutPoint{Hash: tx.TxHash(), Index: 1}, tx.TxOut[1].Value})
 	}
-	v.log("Splice sent: the exchange added %d", p.sats)
+	v.log("Splice sent: the exchange added %s", fmtCoin(p.sats, xc.cfg.Info.Ticker))
 	return empty{}, nil
 }
 

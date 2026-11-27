@@ -247,8 +247,11 @@ func (e *UTXOEngine) Stop() {
 		done := make(chan struct{})
 		go func() { e.node.Wait(); close(done) }()
 		if e.cfg.DataDir != "" && e.rpc != nil {
-			// A kept chain: ask the node to shut down cleanly first.
-			e.rpc.RawRequest("stop", nil)
+			// A kept chain: ask the node to shut down cleanly first. Ctrl+C
+			// in the window may have stopped it already, and the node client
+			// keeps retrying a node that's gone, so don't wait on the request:
+			// wait for the node to exit.
+			go e.rpc.RawRequest("stop", nil)
 			select {
 			case <-done:
 			case <-time.After(20 * time.Second):

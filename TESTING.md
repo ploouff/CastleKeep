@@ -38,7 +38,7 @@ lock, confirm, trade, get your coins back), ticking each off; its buttons do the
 where it is. **Hide this guide** puts it away, and the link under the tabs brings it back.
 
 **Test tools.** The recipes below that make the exchange misbehave, change the price or
-cheat need **Test tools** switched on (top right; the page remembers). With it off, those
+cheat need **Test tools** switched on (at the top, next to the Mine buttons; the page remembers). With it off, those
 buttons are hidden, and the page says so if the exchange was left offline or malicious.
 
 **Buy new BTC.** On the Bitcoin tab: lock `1`, Mine 1 block. In the vault's "Buy more than
@@ -62,8 +62,21 @@ after the window**). You get the whole vault back.
 
 ## C. The separate programs
 
-Three windows, in this order. The chains program starts its own Hardhat node for each EVM
-chain, so you don't need a Hardhat window:
+**The quick way, one window:**
+
+```
+cd console
+go run . start -name alice
+```
+
+It starts the chains, then the exchange and the watchtower, then your wallet, labels every
+line with the program it came from, opens your wallet's page and prints the other pages'
+addresses. Check: Ctrl+C stops everything within a few seconds and says "Everything has
+stopped" (no `btcd`, `ltcd` or `node` left in Task Manager). Started twice, the second one
+says the ports are in use and stops; `-ports 9600` runs a second set beside the first.
+
+**Or three windows**, in this order. The chains program starts its own Hardhat node for each
+EVM chain, so you don't need a Hardhat window:
 
 ```
 cd console
@@ -277,6 +290,40 @@ By hand on your own PC (no server needed), with the public test networks:
    the exchange to Offline is refused ("Only the operator…").
 
 For a real server, follow [SERVER.md](SERVER.md).
+
+`go test -run "ServerAddress|SavedServer|TowerAnswers|StartHelpers|FilesPerNetwork" -v` checks
+the wallet's `-server` option (the three addresses on a server, remembered in the wallet's
+file, a watchtower only when one really answers there), the helpers of `go run . start`, and
+that the public test networks keep their files in `castlekeep-data\testnets`.
+
+## L. The page itself
+
+On the wallet page (any of the ways above):
+
+- The account bar is one row on a laptop screen. Pick a coin in it: its tab opens. Make the
+  window narrow: only the totals show, with **Show coins**.
+- With no vault, the vault panel has the box to lock coins. Type an amount and press Enter:
+  the Lock button shows it's working, then a message in the bottom-right says what happened
+  ("Locked 0.5 BTC into a new vault…").
+- Before the deposit confirms, the Exchange panel says why trading is off. Mine a block: it
+  turns on.
+- Settle and mine: the closed vault shows the box to open the next one.
+- Switch on **Test tools**, set the exchange to Offline and press **Settle with the exchange**:
+  the message is red and says why.
+- **Max** next to an amount fills in the most you can use: your share to sell or swap, your
+  wallet less the network fee to lock. In the order book, pick a price: the limit order form
+  switches side and fills in that price.
+- Stop the exchange (Ctrl+C in its window) with a wallet page open: a banner says the
+  exchange isn't answering and trading waits. Start it again: the banner goes away.
+- During an exit (Request exit, then a block), the guide's last step says the exit window is
+  running; once it's over, its button takes your coins.
+- `go run . start` without `-name` opens the wallet you used last, and says which.
+- Start a wallet without the chains program: after ten seconds it says the chains don't
+  answer and how to start them.
+- Once a vault is closed, its buttons go away and the box to open the next vault shows.
+- **Request exit** asks for a second click ("Click again to request the exit"); left alone, it
+  goes back after a few seconds and nothing happens.
+- Switch Windows to dark mode (Settings, Personalization, Colors): all three pages follow.
 
 ## What a failure looks like
 

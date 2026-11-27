@@ -157,12 +157,12 @@ func (e *walletEthEngine) Do(r ActionReq) error {
 }
 
 func (e *walletEthEngine) Snapshot() Snapshot {
-	s := Snapshot{Chain: e.info, Available: true, Ready: true, Progress: "Ready", Watchtower: e.w.WT, HasUserWT: true, Txs: []*TxInfo{}}
+	s := Snapshot{Chain: e.info, Available: true, Ready: true, Progress: "Ready", Watchtower: e.w.WT, HasUserWT: true, Txs: []*TxInfo{}, Exchange: e.exch}
 	var info InfoResp
 	if err := e.w.look("/v1/info", InfoReq{e.id}, &info); err == nil {
 		s.Price, s.Mode = info.Price, info.Mode
 	} else {
-		s.Mode = "offline"
+		s.ExchDown = exchDown(err, e.exch)
 	}
 	var cr CashResp
 	if e.w.look("/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
@@ -195,7 +195,7 @@ func (e *walletEthEngine) Snapshot() Snapshot {
 	}
 	s.Events = e.events
 	cv, _ := c.readVaultID(v.id)
-	vv := &VaultView{Locked: cv.amount, BestState: -1, PublishedState: -1, ClockTotal: we.delay,
+	vv := &VaultView{Locked: cv.amount, BestState: -1, PublishedState: -1, ClockTotal: we.delay, States: []StateView{},
 		UserDeposit: cv.userDep, ExchDeposit: cv.exchDep, FundPending: v.capPending, ExitSent: cv.exitStart != 0,
 		Address: c.contract + " (vault #" + v.id.String() + ")", CloseKind: v.closed, CloseTxid: v.closeTx,
 		Scripts: []Labelled{

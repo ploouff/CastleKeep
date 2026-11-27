@@ -66,7 +66,8 @@ func openBrowser(url string) {
 }
 
 func main() {
-	// The separate programs: go run . chains | exchange | wallet | watchtower
+	// The separate programs: go run . chains | exchange | wallet | watchtower,
+	// or go run . start for all of them in one window (split_start.go).
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "chains":
@@ -80,6 +81,9 @@ func main() {
 			return
 		case "watchtower":
 			runWatchtower(os.Args[2:])
+			return
+		case "start":
+			runStart(os.Args[2:])
 			return
 		}
 	}
