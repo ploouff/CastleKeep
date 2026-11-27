@@ -236,6 +236,11 @@ them and carry on later:
   states and secrets, cash balances, prices and the order books.
 - `wallet-alice.json` (one per wallet name) holds your keys, revocation secrets, vaults
   and orders.
+- `testnets\` holds the same files for the public test networks (chains started with
+  `-network signet` or `testnets`), so switching between them and the private test chains
+  doesn't mix them up. A file made on the public test networks that is still in
+  `castlekeep-data` itself (from before this folder existed) is moved into `testnets\` the
+  first time a program needs it, and says so.
 
 These files hold private keys in plain text. That's fine for test coins only.
 
@@ -304,8 +309,9 @@ go run . wallet -name bob -chains https://YOUR.SERVER/chains -exchange https://Y
 
 With `-shared`, every request a wallet sends is signed with its own account key and may only
 touch its own account and vaults; changing modes or prices and the admin pages need the
-operator's token; and wallets read the Bitcoin chain through a gateway that passes on only
-the few calls they use. It works with the public test networks (`-network testnets`), not the
+operator's token; wallets read the Bitcoin chain through a gateway that passes on only
+the few calls they use; and limits on requests a second, accounts, vaults, orders and test
+cash keep one wallet from slowing the server down for everyone (listed in SERVER.md). It works with the public test networks (`-network testnets`), not the
 private chains. Step by step, from renting the server to what friends type: [SERVER.md](../SERVER.md).
 
 ### A separate watchtower (keeps watching while your wallet is closed)
@@ -477,6 +483,7 @@ the exchange to lock 1 ETH and mine a block. Click **Add $10,000 test cash**, ch
 | `split_swap.go` | Swaps in the separate programs |
 | `split_tower.go`, `web/tower.html` | The separate watchtower program and its page, and the wallet's side of it |
 | `split_shared.go` | Shared mode for a server: signed requests, ownership checks, the admin token, EVM vault claims, the chains gateway (see `../SERVER.md`) |
+| `split_limits.go` | Limits on a shared server: requests a second per address and per account, accounts, vaults, orders, test cash, what the watchtower keeps, calls to the node at once, request size; the wallet reuses what its page shows from the exchange for 2 seconds |
 
 ## Known limits
 

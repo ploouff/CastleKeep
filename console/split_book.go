@@ -185,6 +185,9 @@ func (x *Exchange) place(r PlaceReq) (PlaceResp, error) {
 	if x.modeOf(r.Chain) == "offline" {
 		return PlaceResp{}, userErr("The exchange is offline and isn't accepting orders.")
 	}
+	if err := x.orderRoom(r.Account); err != nil {
+		return PlaceResp{}, err
+	}
 	user, exch, err := x.vaultShares(r.Chain, r.VaultID, r.Account)
 	if err != nil {
 		return PlaceResp{}, err
@@ -506,8 +509,8 @@ func (w *Wallet) bookAction(chain, ticker string, r ActionReq) (ok string, err e
 // bookSnapshot is the order book for the page, with this wallet's orders.
 // (Not with w.mu held: it calls the exchange.)
 func (w *Wallet) bookSnapshot(chain string) *BookResp {
-	b, err := w.Book(chain)
-	if err != nil {
+	var b BookResp
+	if err := w.look("/v1/book", BookReq{chain, w.Account}, &b); err != nil {
 		return nil
 	}
 	return &b

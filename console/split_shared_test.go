@@ -169,7 +169,7 @@ func TestSharedEVMClaim(t *testing.T) {
 func TestSharedGateway(t *testing.T) {
 	e := engine(t, "btc").(*UTXOEngine)
 	m := http.NewServeMux()
-	m.Handle("/rpc/btc", rpcGateway(e.RPCAddr))
+	m.Handle("/rpc/btc", rpcGateway(e.RPCAddr, nil))
 	m.Handle("/faucet", localOnly(true, handle(func(empty) (empty, error) { return empty{}, nil })))
 	gw := httptest.NewServer(m)
 	t.Cleanup(gw.Close)

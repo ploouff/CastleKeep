@@ -221,6 +221,10 @@ func runChains(args []string) {
 		os.Exit(0)
 	}()
 
+	var gd *guard // limits on a shared server (split_limits.go)
+	if *shared {
+		gd = newGuard(DefaultLimits())
+	}
 	m := http.NewServeMux()
 	m.Handle("/chains", handle(func(empty) ([]ChainStatus, error) {
 		var out []ChainStatus
@@ -248,7 +252,7 @@ func runChains(args []string) {
 		return out, nil
 	}))
 	for id, e := range engines {
-		m.Handle("/rpc/"+id, rpcGateway(e.RPCAddr))
+		m.Handle("/rpc/"+id, rpcGateway(e.RPCAddr, gd))
 	}
 	m.Handle("/contract", localOnly(*shared, handle(func(r ContractReq) (empty, error) {
 		p, ok := publics[r.Chain]
@@ -320,7 +324,7 @@ func runChains(args []string) {
 		}()
 	}
 	fmt.Println("Press Ctrl+C here to stop the nodes.")
-	http.Serve(ln, m)
+	serveHTTP(ln, perAddress(func() *guard { return gd }, m))
 }
 
 // waitChains waits until the chains service reports every chain ready. It
@@ -443,6 +447,7 @@ func runExchange(args []string) {
 	protect := fs.Bool("password", false, "protect the saved file with a password (asked for at start)")
 	unprotect := fs.Bool("remove-password", false, "save the file in plain text again")
 	shared := fs.Bool("shared", false, "on a server other people's wallets reach (SERVER.md): every request must be signed by its wallet and may only touch that wallet's vaults; modes, prices and the admin page need the admin token")
+	maxAccounts := fs.Int("max-accounts", DefaultLimits().Accounts, "with -shared: the most accounts (wallets) the exchange takes")
 	fs.Parse(args)
 
 	cfgs, rpc, eps := waitChains(*chains)
@@ -459,7 +464,7 @@ func runExchange(args []string) {
 			}
 		}
 	}
-	file := filepath.Join(*data, "exchange.json")
+	file := netFile(*data, "exchange.json", onPublic(cfgs, eps))
 	loaded := startSealed(file, "the exchange's file", *fresh, *protect, *unprotect, func(k *sealKey) { x.seal = k }, x.Load)
 	for id, xc := range x.chains {
 		if xc.cfg.Network == "signet" {
@@ -496,6 +501,9 @@ func runExchange(args []string) {
 	adminQuery := ""
 	if *shared {
 		adminQuery = "?token=" + x.Shared()
+		l := DefaultLimits()
+		l.Accounts = *maxAccounts
+		x.SetLimits(l)
 	}
 	go func() {
 		for range time.Tick(time.Second) {
@@ -524,7 +532,7 @@ func runExchange(args []string) {
 	if !*noBrowser {
 		openBrowser(url + "/" + adminQuery)
 	}
-	http.Serve(ln, m)
+	serveHTTP(ln, m)
 }
 
 // ------------------------------------------------------------------ watchtower
@@ -540,6 +548,7 @@ func runWatchtower(args []string) {
 	data := fs.String("data", DataDir(), "folder for the watchtower's saved data (watchtower.json)")
 	fresh := fs.Bool("fresh", false, "start a new watchtower (the old file is renamed, not deleted)")
 	shared := fs.Bool("shared", false, "on a server other people's wallets reach (SERVER.md): its page, which lists every wallet it watches, needs the admin token")
+	maxWallets := fs.Int("max-wallets", DefaultLimits().Accounts, "with -shared: the most wallets the watchtower watches for")
 	fs.Parse(args)
 
 	cfgs, rpc, eps := waitChains(*chains)
@@ -553,12 +562,15 @@ func runWatchtower(args []string) {
 			t.AttachEVM(c.ID, *ep)
 		}
 	}
-	file := filepath.Join(*data, "watchtower.json")
+	file := netFile(*data, "watchtower.json", onPublic(cfgs, eps))
 	startFile(file, *fresh, t.Load)
 	t.SaveTo(file)
 	pageQuery := ""
 	if *shared {
 		pageQuery = "?token=" + t.Shared()
+		l := DefaultLimits()
+		l.Accounts = *maxWallets
+		t.SetLimits(l)
 	}
 	// Its own coins, only to pay gas when it submits a state on an EVM chain.
 	for _, c := range evmChains {
@@ -606,7 +618,7 @@ func runWatchtower(args []string) {
 	if !*noBrowser {
 		openBrowser(url + "/" + pageQuery)
 	}
-	http.Serve(ln, m)
+	serveHTTP(ln, m)
 }
 
 // ------------------------------------------------------------------ wallet
@@ -643,7 +655,7 @@ func runWallet(args []string) {
 			}
 		}
 	}
-	file := filepath.Join(*data, walletFile(*name))
+	file := netFile(*data, walletFile(*name), onPublic(cfgs, eps))
 	loaded := startSealed(file, "your wallet", *fresh, *protect, *unprotect, func(k *sealKey) { w.seal = k }, w.Load)
 	if !loaded {
 		w.SetName(*name)
@@ -709,7 +721,7 @@ func runWallet(args []string) {
 	account := func() AccountView {
 		cash := int64(0)
 		var cr CashResp
-		if w.call("/v1/cashbalance", CashReq{w.Account}, &cr) == nil {
+		if w.look("/v1/cashbalance", CashReq{w.Account}, &cr) == nil {
 			cash = cr.CashCents
 		}
 		a := NewAccount()
@@ -851,13 +863,13 @@ func (e *walletEngine) height() int64 {
 func (e *walletEngine) Snapshot() Snapshot {
 	s := Snapshot{Chain: e.info, Available: true, Ready: true, Progress: "Ready", Watchtower: e.w.WT, HasUserWT: true, Txs: []*TxInfo{}}
 	var info InfoResp
-	if err := e.w.call("/v1/info", InfoReq{e.id}, &info); err == nil {
+	if err := e.w.look("/v1/info", InfoReq{e.id}, &info); err == nil {
 		s.Price, s.Mode = info.Price, info.Mode
 	} else {
 		s.Mode = "offline"
 	}
 	var cr CashResp
-	if e.w.call("/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
+	if e.w.look("/v1/cashbalance", CashReq{e.w.Account}, &cr) == nil {
 		s.CashCents = cr.CashCents
 	}
 	s.Who, s.Book = e.w.Name, e.w.bookSnapshot(e.id)

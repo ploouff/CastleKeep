@@ -865,11 +865,84 @@ func (e *UTXOEngine) saveMiner() {
 // sameChain refuses a saved file made on a different test chain (for example
 // after the chains program was started with -fresh).
 func sameChain(path, chain, saved string, c *chainConn) error {
-	if now := c.tag(); saved != "" && now != "" && saved != now {
-		return fmt.Errorf("%s was saved on a different %s test chain (the chains were started fresh). "+
-			"Start this program with -fresh as well, or start the chains without -fresh", path, strings.ToUpper(chain))
+	now := c.tag()
+	switch {
+	case saved == "" || now == "" || saved == now:
+		return nil
+	case saved == signetBlock1:
+		return fmt.Errorf("%s was made on Bitcoin's signet (the public test networks), and the chains running now are the private test chains. "+
+			"Start the chains with -network testnets to use it, or start this program with another -data folder", path)
+	case now == signetBlock1:
+		return fmt.Errorf("%s was made on the private test chains, and the chains running now are the public test networks. "+
+			"Start the chains without -network to use it, or start this program with another -data folder", path)
 	}
-	return nil
+	return fmt.Errorf("%s was saved on a different %s test chain (the chains were started fresh). "+
+		"Start this program with -fresh as well, or start the chains without -fresh", path, strings.ToUpper(chain))
+}
+
+// ------------------------------------------------------------------ which network
+
+// The exchange, wallets and watchtower keep their files for the public test
+// networks (chains run with -network signet or testnets) in a folder of their
+// own, so switching between those and the private test chains doesn't mix
+// them up. The chains program has its own folders already (chains, chains-signet).
+const publicFolder = "testnets"
+
+// signetBlock1 is the hash of block 1 on Bitcoin's signet: the Bitcoin tag
+// (chainConn.tag) of a file made on the public test networks.
+const signetBlock1 = "00000086d6b2636cb2a392d45edc4ec544a10024d30141c9adf4bfd9de533b53"
+
+// onPublic says whether the chains program runs the public test networks.
+func onPublic(cfgs map[string]UTXOConfig, eps map[string]*EthEndpoint) bool {
+	for _, c := range cfgs {
+		if c.Network == "signet" {
+			return true
+		}
+	}
+	for _, ep := range eps {
+		if ep != nil && ep.Public {
+			return true
+		}
+	}
+	return false
+}
+
+// netFile is where a program keeps its file: in data for the private test
+// chains, in data\testnets for the public test networks. A file made on the
+// public test networks before they had their own folder is still in data
+// itself: it is moved to data\testnets first (moved, never deleted), unless
+// there is a file there already.
+func netFile(data, name string, public bool) string {
+	old, to := filepath.Join(data, name), filepath.Join(data, publicFolder, name)
+	if madeOnPublic(old) {
+		if _, err := os.Stat(to); err != nil {
+			if err := os.MkdirAll(filepath.Dir(to), 0o700); err == nil && os.Rename(old, to) == nil {
+				if public {
+					fmt.Println("Moved", old, "to", to, "(files for the public test networks now have a folder of their own).")
+				} else {
+					fmt.Println(old, "was made on the public test networks, so it was moved to", to,
+						"(it's used again when the chains run with -network testnets). A new one starts for the private test chains.")
+				}
+			}
+		}
+	}
+	if public {
+		return to
+	}
+	return old
+}
+
+// madeOnPublic: was the file at path made on Bitcoin's signet? (A file with
+// a password can't be read here: it stays where it is.)
+func madeOnPublic(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var f struct {
+		Chains map[string]struct{ Tag string }
+	}
+	return json.Unmarshal(data, &f) == nil && f.Chains["btc"].Tag == signetBlock1
 }
 
 // The chains program remembers the CastleVault contract it deployed, with a

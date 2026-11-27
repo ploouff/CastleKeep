@@ -149,7 +149,7 @@ This is a proof of concept, not a product.
 - [x] Fee bumping (child pays for parent, anchor outputs on the exit request; separate programs)
 - [x] A separate watchtower program that protects you while your wallet is closed (no keys to your coins)
 - [x] A page a newcomer can follow: a five-step first try, plain-language word list, and test-only buttons behind a "Test tools" switch
-- [x] Shared mode for a server friends can use (signed requests, an operator token, a gateway to the Bitcoin node) and a step-by-step guide: [SERVER.md](SERVER.md)
+- [x] Shared mode for a server friends can use (signed requests, an operator token, a gateway to the Bitcoin node, limits on requests, accounts, vaults and orders) and a step-by-step guide: [SERVER.md](SERVER.md)
 - [ ] Real fee estimation (btcd usually has no estimate; a minimum rate is used)
 - [ ] Lightning-channel version for near-instant deposits and withdrawals
 

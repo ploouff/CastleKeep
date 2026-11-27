@@ -139,6 +139,10 @@ The exchange and watchtower wait until the chains are ready. Watch the signet do
 an exit in an afternoon. Leave it out for the full 24 hours. On signet the window is always
 144 blocks (about a day).
 
+The exchange takes at most 100 accounts and the watchtower at most 100 wallets (see
+"Limits" below). For a bigger group, add `-max-accounts 200` to the exchange's `ExecStart`
+line and `-max-wallets 200` to the watchtower's.
+
 ## 5. HTTPS in front (Caddy)
 
 The three programs only listen on the server itself. Caddy answers on the internet with
@@ -234,7 +238,9 @@ exit
 systemctl restart castlekeep-chains castlekeep-exchange castlekeep-watchtower
 ```
 
-Everything is kept between restarts (in `/home/castlekeep/castlekeep-data`).
+Everything is kept between restarts (in `/home/castlekeep/castlekeep-data`; the exchange's and
+watchtower's files are in its `testnets` folder, since the server runs the public test
+networks).
 
 ## What shared mode does, and what it doesn't
 
@@ -253,14 +259,41 @@ Everything is kept between restarts (in `/home/castlekeep/castlekeep-data`).
   use: reading blocks, transactions, unspent coins, the waiting list and the fee estimate,
   finding coins sent to an address, and sending a transaction. Its faucet, mining and
   contract endpoints only answer programs on the server itself.
+- **Limits**, so one wallet (or a script) can't slow the server down for everyone or fill
+  its disk. Going over one gets a plain message saying which limit it was:
+
+  | What | Limit |
+  | --- | --- |
+  | Requests from one internet address (each of the three programs) | 60 a second on average, up to 600 at once |
+  | Requests from one exchange account | 30 a second on average, up to 300 at once |
+  | Accounts on the exchange, wallets on the watchtower | 100 each (`-max-accounts`, `-max-wallets`) |
+  | New accounts (or watchtower wallets) from one address | 5 a day |
+  | Bitcoin vaults per account that aren't closed | 10 (vaults that were never finished make room by themselves) |
+  | Open orders per account | 50 |
+  | "Add test cash" | stops at $100,000 of cash |
+  | What the watchtower keeps per wallet | 200 vaults, 16 MB of signed transactions |
+  | Calls from outside to the Bitcoin node at once | 16 (others wait up to 10 seconds) |
+  | Size of one request to the exchange | 256 KB |
+
+  A wallet sends the exchange about 7 requests a second, however many tabs of its page
+  are open (measured with all seven chains and an open order: the page's prices, cash
+  and order books are reused for 2 seconds). So the rates leave room for several wallets
+  on one internet connection. The programs
+  read each visitor's address from what Caddy passes on, so keep them on 127.0.0.1 behind
+  Caddy as above. Requests from the server itself (the exchange and watchtower reading the
+  chains) aren't counted. A connection that sends its request too slowly is cut off after
+  a minute.
 
 It does **not**:
 
 - Make the code safe for real money. It has not been audited. Test networks only.
-- Limit how much anyone can send: someone could flood the server with requests. Fine for a
-  small group of friends; not for the open internet at large.
+- Stop someone with many internet addresses: the limits count per address (an IPv6
+  address counts per block of 2^64, the size one connection usually gets), so more
+  addresses means more requests and more new accounts. Fine for a group of friends; not
+  for the open internet at large.
+- Limit vaults on the EVM networks: each one already costs its owner a deposit and gas
+  before the exchange hears of it.
 - Hide anything from the exchange: like any exchange, it sees every trade. The watchtower
   sees its users' vault transactions and amounts.
-- Stop people making as many accounts as they like, each with free test cash.
 - Protect a wallet's file on a friend's computer: keys are in plain text there unless they
   start the wallet with `-password`.
